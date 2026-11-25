@@ -104,8 +104,9 @@ func dropTables(ctx context.Context, role string) (int, error) {
 }
 
 func deleteNATS(ctx context.Context, kind, name, user string) error {
-	nc, err := nats.Connect(stump.Env("NATS_URL", "nats://nats.messaging.svc.cluster.local:4222"),
-		nats.Name("reset"), nats.UserInfo(user, os.Getenv("NATS_"+strings.ToUpper(strings.ReplaceAll(user, "-", "_"))+"_PASSWORD")))
+	pw := os.Getenv("NATS_" + strings.ToUpper(strings.ReplaceAll(user, "-", "_")) + "_PASSWORD")
+	opts := append(stump.NATSOptions("reset", user, pw), nats.MaxReconnects(0))
+	nc, err := nats.Connect(stump.Env("NATS_URL", "nats://nats.messaging.svc.cluster.local:4222"), opts...)
 	if err != nil {
 		return err
 	}
