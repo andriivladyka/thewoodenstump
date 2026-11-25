@@ -38,23 +38,34 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	failed := false
-	step := func(what string, err error) {
-		if err != nil {
-			failed = true
-			log.Error(what, "err", err)
-		} else {
-			log.Info(what)
+	// A new pod's network policy can take a moment to apply, so each step
+	// gets a few tries before it counts as failed.
+	step := func(what string, f func() (string, error)) {
+		var err error
+		for try := 0; try < 10; try++ {
+			var done string
+			if done, err = f(); err == nil {
+				log.Info(done)
+				return
+			}
+			time.Sleep(3 * time.Second)
 		}
+		failed = true
+		log.Error("could not "+what, "err", err)
 	}
 	for _, role := range dbRoles {
-		n, err := dropTables(ctx, role)
-		step(fmt.Sprintf("dropped %d tables in schema %s", n, role), err)
+		step("drop the tables in schema "+role, func() (string, error) {
+			n, err := dropTables(ctx, role)
+			return fmt.Sprintf("dropped %d tables in schema %s", n, role), err
+		})
 	}
 	for _, s := range natsState {
-		step(fmt.Sprintf("deleted NATS %s %s", s[0], s[1]), deleteNATS(ctx, s[0], s[1], s[2]))
+		step(fmt.Sprintf("delete NATS %s %s", s[0], s[1]), func() (string, error) {
+			return fmt.Sprintf("deleted NATS %s %s", s[0], s[1]), deleteNATS(ctx, s[0], s[1], s[2])
+		})
 	}
 	for _, d := range strings.Fields(stump.Env("RESTART", "")) {
-		step("restarted "+d, restart(ctx, d))
+		step("restart "+d, func() (string, error) { return "restarted " + d, restart(ctx, d) })
 	}
 	if failed {
 		log.Error("reset finished with errors")
