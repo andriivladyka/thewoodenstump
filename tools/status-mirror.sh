@@ -20,7 +20,7 @@ now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 files=(.well-known/agent-card.json .well-known/terms.json llms.txt openapi.json)
 
 mkdir -p "$out/.well-known"
-fetch() { curl -fsS --max-time 15 --retry 2 --retry-delay 5 -o "$2" "$1"; }
+fetch() { curl -fsS -A "stump-status-mirror/1 (+https://github.com/andriivladyka/thewoodenstump)" --max-time 15 --retry 2 --retry-delay 5 -o "$2" "$1"; }
 
 # The previous run's view, so a failed probe keeps the last good files.
 prev=$(mktemp)
