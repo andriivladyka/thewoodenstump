@@ -1,0 +1,36 @@
+# Metrics endpoints that the VictoriaMetrics stack does not find by itself.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: traefik
+  namespace: traefik
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  podMetricsEndpoints:
+    - port: metrics
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: nats
+  namespace: messaging
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+  podMetricsEndpoints:
+    - port: prom-metrics
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: postgres
+  namespace: data
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: stump-pg
+  podMetricsEndpoints:
+    - port: metrics

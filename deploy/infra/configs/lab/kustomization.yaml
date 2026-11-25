@@ -4,4 +4,5 @@ resources:
   - ../base/lab-ca
   - ../base/traefik
   - ../base/postgres
+  - ../base/scrapes
   - s3-backups.yaml
