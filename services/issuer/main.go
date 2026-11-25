@@ -53,6 +53,10 @@ func main() {
 			issued_at timestamptz NOT NULL, expires_at timestamptz NOT NULL,
 			signature text NOT NULL, revoked_at timestamptz, revoke_reason text)`,
 		`CREATE INDEX IF NOT EXISTS credentials_subject ON credentials (lower(subject))`,
+		// Wallets the operator blocked for abuse: their keys are revoked and
+		// no new ones are issued.
+		`CREATE TABLE IF NOT EXISTS blocked_wallets (
+			wallet text PRIMARY KEY, reason text NOT NULL, blocked_at timestamptz NOT NULL DEFAULT now())`,
 	); err != nil {
 		app.Log.Error("migrate", "err", err)
 		os.Exit(1)
@@ -75,6 +79,9 @@ func main() {
 	app.Mux.HandleFunc("POST /internal/credentials", is.issue)
 	app.Mux.HandleFunc("GET /internal/credentials/{id}/status", is.status)
 	app.Mux.HandleFunc("POST /internal/credentials/{id}/revoke", is.revoke)
+	// Operator only: reached with kubectl port-forward.
+	app.Mux.HandleFunc("POST /internal/wallets/{wallet}/block", is.block)
+	app.Mux.HandleFunc("DELETE /internal/wallets/{wallet}/block", is.unblock)
 	app.Serve()
 }
 
@@ -99,6 +106,12 @@ func (is *issuer) issue(w http.ResponseWriter, r *http.Request) {
 	}
 	if !common.IsHexAddress(req.Subject) || req.ValidDays < 1 || req.ValidDays > 366 || req.PaymentRef == "" {
 		stump.Error(w, 400, "bad_request", "subject, valid_days (1-366) and payment_ref are required")
+		return
+	}
+	var blocked bool
+	is.db.QueryRow(r.Context(), `SELECT true FROM blocked_wallets WHERE wallet=lower($1)`, req.Subject).Scan(&blocked)
+	if blocked {
+		stump.Error(w, 403, "wallet_blocked", "this wallet was blocked for abuse")
 		return
 	}
 	id := make([]byte, 16)
@@ -176,6 +189,63 @@ func (is *issuer) revoke(w http.ResponseWriter, r *http.Request) {
 	stump.JSON(w, 200, map[string]any{"revoked": c.ID})
 }
 
+// block revokes every live key of a wallet and refuses new ones.
+func (is *issuer) block(w http.ResponseWriter, r *http.Request) {
+	wallet := r.PathValue("wallet")
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if !common.IsHexAddress(wallet) {
+		stump.Error(w, 400, "bad_wallet", "not an address")
+		return
+	}
+	if err := stump.ReadJSON(r, 1024, &req); err != nil || req.Reason == "" {
+		stump.Error(w, 400, "bad_request", "reason is required")
+		return
+	}
+	if _, err := is.db.Exec(r.Context(), `INSERT INTO blocked_wallets (wallet, reason) VALUES (lower($1), $2)
+		ON CONFLICT (wallet) DO UPDATE SET reason=$2`, wallet, req.Reason); err != nil {
+		stump.Error(w, 500, "block_failed", err.Error())
+		return
+	}
+	rows, err := is.db.Query(r.Context(), `UPDATE credentials SET revoked_at=now(), revoke_reason=$2
+		WHERE lower(subject)=lower($1) AND revoked_at IS NULL
+		RETURNING id, subject, subject_chain_id, plan, terms_version, payment_ref, issued_at, expires_at, signature`,
+		wallet, "blocked: "+req.Reason)
+	if err != nil {
+		stump.Error(w, 500, "revoke_failed", err.Error())
+		return
+	}
+	var revoked []*cred.Credential
+	for rows.Next() {
+		var c cred.Credential
+		var issued, expires time.Time
+		if err := rows.Scan(&c.ID, &c.Subject, &c.SubjectChainID, &c.Plan, &c.TermsVersion,
+			&c.PaymentRef, &issued, &expires, &c.Signature); err == nil {
+			c.IssuedAt, c.ExpiresAt, c.Issuer = issued.Unix(), expires.Unix(), is.signer.Address().Hex()
+			revoked = append(revoked, &c)
+		}
+	}
+	rows.Close()
+	ids := []string{}
+	for _, c := range revoked {
+		is.emit(r.Context(), "revoked", c)
+		ids = append(ids, c.ID)
+	}
+	slog.Info("wallet blocked", "wallet", common.HexToAddress(wallet).Hex(), "revoked", len(ids), "reason", req.Reason)
+	stump.JSON(w, 200, map[string]any{"blocked": common.HexToAddress(wallet).Hex(), "revoked": ids})
+}
+
+// unblock lets a wallet get keys again; revoked keys stay revoked.
+func (is *issuer) unblock(w http.ResponseWriter, r *http.Request) {
+	tag, err := is.db.Exec(r.Context(), `DELETE FROM blocked_wallets WHERE wallet=lower($1)`, r.PathValue("wallet"))
+	if err != nil {
+		stump.Error(w, 500, "unblock_failed", err.Error())
+		return
+	}
+	stump.JSON(w, 200, map[string]any{"unblocked": tag.RowsAffected() > 0})
+}
+
 func (is *issuer) lookup(w http.ResponseWriter, r *http.Request) {
 	wallet := r.PathValue("wallet")
 	if !common.IsHexAddress(wallet) {
@@ -217,6 +287,8 @@ func (is *issuer) lookup(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, e)
 	}
+	var blocked bool
+	is.db.QueryRow(r.Context(), `SELECT true FROM blocked_wallets WHERE wallet=lower($1)`, wallet).Scan(&blocked)
 	stump.JSON(w, 200, map[string]any{"wallet": common.HexToAddress(wallet).Hex(),
-		"issuer": is.signer.Address().Hex(), "credentials": out})
+		"issuer": is.signer.Address().Hex(), "blocked": blocked, "credentials": out})
 }

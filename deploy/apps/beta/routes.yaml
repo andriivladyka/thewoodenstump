@@ -1,0 +1,141 @@
+# Beta routes. thewoodenstump.lol arrives through the Cloudflare tunnel on
+# the in-cluster HTTP entry; stump.lab.internal still works on the LAN.
+# Unknown /v1 paths still pass edge-auth, so a call without a key gets 402
+# with purchase terms on any /v1 path. Every route has per-client limits.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: stump
+  namespace: stump
+spec:
+  entryPoints: [websecure]
+  routes:
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (PathPrefix(`/v1/keys`) || PathPrefix(`/v1/payments/webhooks/`))
+      priority: 100
+      middlewares:
+        - name: client-limits
+      services:
+        - name: billing
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (Path(`/v1/issuer`) || PathPrefix(`/v1/trust/`))
+      priority: 100
+      middlewares:
+        - name: client-limits
+      services:
+        - name: issuer
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (PathPrefix(`/v1/boards`) || PathPrefix(`/v1/messages/`))
+      priority: 100
+      middlewares:
+        - name: client-limits
+        - name: edge-auth
+      services:
+        - name: board
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (PathPrefix(`/v1/vouches`) || PathPrefix(`/v1/flags`) || PathPrefix(`/v1/trust-paths`) || PathPrefix(`/v1/delegations`))
+      priority: 100
+      middlewares:
+        - name: client-limits
+        - name: edge-auth
+      services:
+        - name: trust
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (PathPrefix(`/v1`))
+      priority: 50
+      middlewares:
+        - name: client-limits
+        - name: edge-auth
+      services:
+        - name: web
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (Path(`/mcp`))
+      priority: 100
+      middlewares:
+        - name: client-limits
+      services:
+        - name: mcp
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (PathPrefix(`/`))
+      priority: 1
+      middlewares:
+        - name: client-limits
+      services:
+        - name: web
+          port: 8080
+  tls: {}
+---
+# The same routes on the in-cluster HTTP entry.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: stump-internal
+  namespace: stump
+spec:
+  entryPoints: [web]
+  routes:
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (PathPrefix(`/v1/keys`) || PathPrefix(`/v1/payments/webhooks/`))
+      priority: 100
+      middlewares:
+        - name: client-limits
+      services:
+        - name: billing
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (Path(`/v1/issuer`) || PathPrefix(`/v1/trust/`))
+      priority: 100
+      middlewares:
+        - name: client-limits
+      services:
+        - name: issuer
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (PathPrefix(`/v1/boards`) || PathPrefix(`/v1/messages/`))
+      priority: 100
+      middlewares:
+        - name: client-limits
+        - name: edge-auth
+      services:
+        - name: board
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (PathPrefix(`/v1/vouches`) || PathPrefix(`/v1/flags`) || PathPrefix(`/v1/trust-paths`) || PathPrefix(`/v1/delegations`))
+      priority: 100
+      middlewares:
+        - name: client-limits
+        - name: edge-auth
+      services:
+        - name: trust
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (PathPrefix(`/v1`))
+      priority: 50
+      middlewares:
+        - name: client-limits
+        - name: edge-auth
+      services:
+        - name: web
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (Path(`/mcp`))
+      priority: 100
+      middlewares:
+        - name: client-limits
+      services:
+        - name: mcp
+          port: 8080
+    - kind: Rule
+      match: (Host(`thewoodenstump.lol`) || Host(`stump.lab.internal`)) && (PathPrefix(`/`))
+      priority: 1
+      middlewares:
+        - name: client-limits
+      services:
+        - name: web
+          port: 8080

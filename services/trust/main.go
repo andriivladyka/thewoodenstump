@@ -78,6 +78,8 @@ func main() {
 	app.Mux.HandleFunc("DELETE /v1/vouches/{id}", t.revoke)
 	app.Mux.HandleFunc("POST /v1/flags", t.flag)
 	app.Mux.HandleFunc("GET /v1/flags", t.listFlags)
+	// Operator only: the newest flags on any wallet, through kubectl port-forward.
+	app.Mux.HandleFunc("GET /internal/flags", t.recentFlags)
 	app.Mux.HandleFunc("GET /v1/trust-paths", t.paths)
 	app.Mux.HandleFunc("POST /v1/delegations", t.delegate)
 	app.Mux.HandleFunc("GET /v1/delegations", t.listDelegations)
@@ -258,6 +260,30 @@ func (t *trust) listFlags(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{"id": id, "flagger": flagger, "reason": reason, "note": note, "signature": sig, "created_at": at})
 	}
 	stump.JSON(w, 200, map[string]any{"subject": norm(subject), "flags": out})
+}
+
+func (t *trust) recentFlags(w http.ResponseWriter, r *http.Request) {
+	rows, err := t.db.Query(r.Context(), `SELECT subject, count(*), array_agg(DISTINCT reason),
+		count(DISTINCT flagger), extract(epoch from max(created_at))::bigint
+		FROM flags WHERE created_at > now() - interval '14 days'
+		GROUP BY subject ORDER BY count(DISTINCT flagger) DESC, max(created_at) DESC LIMIT 100`)
+	if err != nil {
+		stump.Error(w, 500, "db", err.Error())
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var subject string
+		var n, flaggers, last int64
+		var reasons []string
+		if err := rows.Scan(&subject, &n, &reasons, &flaggers, &last); err != nil {
+			stump.Error(w, 500, "db", err.Error())
+			return
+		}
+		out = append(out, map[string]any{"subject": subject, "flags": n, "flaggers": flaggers, "reasons": reasons, "last_at": last})
+	}
+	stump.JSON(w, 200, map[string]any{"since_days": 14, "subjects": out})
 }
 
 // paths returns every vouch path from one of the anchors to the target, up

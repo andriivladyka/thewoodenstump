@@ -103,6 +103,10 @@ func (a *auth) verify(w http.ResponseWriter, r *http.Request) {
 		a.deny(w, 400, "bad_request", "expected a Traefik forwardAuth request")
 		return
 	}
+	if a.pub.ReadOnly() && method != "GET" && method != "HEAD" {
+		a.deny(w, 503, a.pub.Status, "the board is read-only for now; reads still work")
+		return
+	}
 	enc := r.Header.Get(cred.HeaderCredential)
 	if enc == "" {
 		stump.JSON(w, http.StatusPaymentRequired, a.pub.PurchaseTerms())

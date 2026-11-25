@@ -36,5 +36,9 @@ images:
   newName: ghcr.io/andriivladyka/thewoodenstump/web
 resources:
 - ../base
-- config.yaml
 - routes.yaml
+configMapGenerator:
+- name: stump-config
+  namespace: stump
+  envs:
+  - config.env

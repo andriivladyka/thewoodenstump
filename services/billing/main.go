@@ -10,9 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -30,6 +33,13 @@ type billing struct {
 	rails     map[string]ports.PaymentProvider
 	trial     *ports.Trial
 	http      *http.Client
+
+	// Open-trial limits on new keys (renewals of a live key are free).
+	perIP  int // per client address per UTC day, counted in memory only
+	perDay int // all new open-trial keys per UTC day
+	mu     sync.Mutex
+	day    string
+	byIP   map[string]int
 }
 
 func main() {
@@ -37,7 +47,7 @@ func main() {
 	ctx := app.Context()
 	pub := stump.PublicFromEnv()
 	days, _ := strconv.Atoi(stump.Env("TRIAL_DAYS", "30"))
-	trial := ports.NewTrial(pub.TrialEnabled, days, stump.Env("TRIAL_ALLOWLIST", ""))
+	trial := ports.NewTrial(pub.TrialEnabled, pub.TrialOpen, days, stump.Env("TRIAL_ALLOWLIST", ""))
 	db, err := stump.DB(ctx, "billing")
 	if err != nil {
 		os.Exit(1)
@@ -55,7 +65,9 @@ func main() {
 		app.Log.Error("migrate", "err", err)
 		os.Exit(1)
 	}
-	b := &billing{db: db, pub: pub, trial: trial,
+	perIP, _ := strconv.Atoi(stump.Env("TRIAL_KEYS_PER_IP_PER_DAY", "3"))
+	perDay, _ := strconv.Atoi(stump.Env("TRIAL_KEYS_PER_DAY", "200"))
+	b := &billing{db: db, pub: pub, trial: trial, perIP: perIP, perDay: perDay, byIP: map[string]int{},
 		issuerURL: stump.Env("ISSUER_URL", "http://issuer:8080"),
 		http:      stump.HTTPClient(10 * time.Second),
 		rails: map[string]ports.PaymentProvider{
@@ -112,16 +124,35 @@ func (b *billing) buy(w http.ResponseWriter, r *http.Request) {
 
 	// One live trial key per wallet: hand back the one already issued.
 	if req.Rail == "trial" {
-		var encoded string
+		var encoded, credID string
 		var expires time.Time
-		err := b.db.QueryRow(r.Context(), `SELECT credential, expires_at FROM orders
+		err := b.db.QueryRow(r.Context(), `SELECT credential, credential_id, expires_at FROM orders
 			WHERE lower(wallet)=lower($1) AND rail='trial' AND status='issued' AND expires_at > now()
-			ORDER BY created_at DESC LIMIT 1`, wallet.Hex()).Scan(&encoded, &expires)
+			ORDER BY created_at DESC LIMIT 1`, wallet.Hex()).Scan(&encoded, &credID, &expires)
+		if err == nil && b.revoked(r, credID) {
+			b.db.Exec(r.Context(), `UPDATE orders SET status='revoked' WHERE credential_id=$1`, credID)
+			err = pgx.ErrNoRows
+		}
 		if err == nil {
 			stump.JSON(w, 200, map[string]any{"credential": encoded, "expires_at": expires.Unix(), "reused": true})
 			return
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			stump.Error(w, 500, "lookup_failed", err.Error())
+			return
+		}
+	}
+
+	if b.pub.ReadOnly() {
+		msg := "the board is read-only for now; no new keys are issued"
+		if b.pub.Status == "sunset" {
+			msg = "the service is shutting down; no new keys are sold"
+		}
+		stump.Error(w, 503, b.pub.Status, msg)
+		return
+	}
+	if req.Rail == "trial" && b.trial.Open && !b.trial.Listed(wallet) {
+		if code, msg := b.openTrialLimit(r); code != "" {
+			stump.Error(w, 429, code, msg)
 			return
 		}
 	}
@@ -140,6 +171,9 @@ func (b *billing) buy(w http.ResponseWriter, r *http.Request) {
 		b.db.Exec(r.Context(), `UPDATE orders SET status='refused' WHERE id=$1`, order)
 		terms := b.pub.PurchaseTerms()
 		terms["message"] = "This wallet is not on the trial allowlist, and paid rails are switched off here."
+		if b.trial.Open {
+			terms["message"] = "Free keys are not available for this request, and paid rails are switched off here."
+		}
 		stump.JSON(w, 402, terms)
 		return
 	case errors.Is(err, ports.ErrPaymentsDisabled):
@@ -152,6 +186,10 @@ func (b *billing) buy(w http.ResponseWriter, r *http.Request) {
 	issued, err := b.issue(r, wallet, req, p)
 	if err != nil {
 		b.db.Exec(r.Context(), `UPDATE orders SET status='failed' WHERE id=$1`, order)
+		if errors.Is(err, errBlocked) {
+			stump.Error(w, 403, "wallet_blocked", "this wallet was blocked for abuse")
+			return
+		}
 		stump.Error(w, 502, "issue_failed", err.Error())
 		return
 	}
@@ -159,6 +197,61 @@ func (b *billing) buy(w http.ResponseWriter, r *http.Request) {
 		WHERE id=$1`, order, issued.Credential.ID, issued.Encoded, issued.Credential.ExpiresAt)
 	stump.JSON(w, 201, map[string]any{"credential": issued.Encoded, "credential_json": issued.Credential,
 		"expires_at": issued.Credential.ExpiresAt, "order": order})
+}
+
+// openTrialLimit counts a new open-trial key against the per-address and
+// daily limits. Addresses are only counted in memory and never stored.
+func (b *billing) openTrialLimit(r *http.Request) (code, msg string) {
+	var n int
+	err := b.db.QueryRow(r.Context(), `SELECT count(*) FROM orders
+		WHERE rail='trial' AND status='issued' AND created_at >= date_trunc('day', now(), 'UTC')`).Scan(&n)
+	if err != nil {
+		return "lookup_failed", "try again later"
+	}
+	if n >= b.perDay {
+		return "trial_limit", "today's free beta keys are gone; new ones open at 00:00 UTC"
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if d := time.Now().UTC().Format("20060102"); d != b.day {
+		b.day, b.byIP = d, map[string]int{}
+	}
+	ip := clientIP(r)
+	if b.byIP[ip] >= b.perIP {
+		return "trial_limit", fmt.Sprintf("at most %d new free keys a day from one address; it resets at 00:00 UTC", b.perIP)
+	}
+	b.byIP[ip]++
+	return "", ""
+}
+
+// clientIP is the caller's address: Cloudflare's header when the request
+// came through the tunnel, else what Traefik saw.
+func clientIP(r *http.Request) string {
+	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		return ip
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		return strings.TrimSpace(strings.Split(xff, ",")[0])
+	}
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return host
+}
+
+var errBlocked = errors.New("wallet_blocked")
+
+// revoked asks the issuer whether a key was revoked. When it cannot tell,
+// it says no: edge-auth still refuses a revoked key on every request.
+func (b *billing) revoked(r *http.Request, id string) bool {
+	req, _ := http.NewRequestWithContext(r.Context(), "GET", b.issuerURL+"/internal/credentials/"+id+"/status", nil)
+	resp, err := b.http.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var st struct {
+		Revoked bool `json:"revoked"`
+	}
+	return resp.StatusCode == 200 && json.NewDecoder(resp.Body).Decode(&st) == nil && st.Revoked
 }
 
 type issued struct {
@@ -180,6 +273,9 @@ func (b *billing) issue(r *http.Request, wallet common.Address, req keyRequest, 
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == 403 {
+		return nil, errBlocked
+	}
 	if resp.StatusCode != 201 {
 		return nil, fmt.Errorf("issuer answered %d", resp.StatusCode)
 	}

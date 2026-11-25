@@ -1,5 +1,6 @@
-# Applied in order: controllers (operators, CRDs), then configs that use
-# those CRDs, then the services.
+# The lab machine, which runs the public beta. Applied in order:
+# controllers (operators, CRDs), then configs that use those CRDs, then the
+# services, then the tunnel that makes them public.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -45,9 +46,29 @@ spec:
   interval: 10m
   retryInterval: 1m
   timeout: 10m
-  path: ./deploy/apps/lab
+  path: ./deploy/apps/beta
   prune: true
   wait: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+---
+# No health wait: until the tunnel token exists on the host, cloudflared
+# waits for its Secret and the rest of the cluster carries on.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: tunnel
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: apps
+  interval: 10m
+  retryInterval: 1m
+  timeout: 5m
+  path: ./deploy/infra/tunnel
+  prune: true
+  wait: false
   sourceRef:
     kind: GitRepository
     name: flux-system

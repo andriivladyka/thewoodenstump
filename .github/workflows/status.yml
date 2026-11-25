@@ -1,0 +1,48 @@
+# Off-server status: probes the service from GitHub about every 15 minutes
+# and publishes status.json plus the last good discovery files to GitHub
+# Pages. Set the repository variable STUMP_PUBLIC_URL once the service is
+# public; until then the page says not_public. Edit status/notice.json to
+# post a notice that shows even while the server is down.
+name: status
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/status.yml", "status/**", "tools/status-mirror.sh"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: pages
+        uses: actions/configure-pages@v6.0.0
+      - name: Probe and mirror
+        env:
+          PUBLIC_URL: ${{ vars.STUMP_PUBLIC_URL }}
+          MIRROR_URL: ${{ steps.pages.outputs.base_url }}
+        run: bash tools/status-mirror.sh site
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: site
+          include-hidden-files: true
+      - id: deploy
+        uses: actions/deploy-pages@v5.0.1

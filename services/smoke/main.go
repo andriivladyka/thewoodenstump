@@ -150,6 +150,15 @@ func (c *client) run() {
 		check("GET "+p, code == 200, fmt.Sprintf("HTTP %d", code))
 	}
 
+	code, body, _ = c.do("GET", "/status.json", nil, false)
+	var st struct {
+		Status     string            `json:"status"`
+		Components map[string]string `json:"components"`
+	}
+	json.Unmarshal(body, &st)
+	check("status reports every part up", code == 200 && st.Status != "" && st.Status != "degraded" && len(st.Components) == 3,
+		fmt.Sprintf("HTTP %d, %s %v", code, st.Status, st.Components))
+
 	// 2. No key: 402 with terms
 	code, body, _ = c.do("GET", "/v1/boards", nil, false)
 	check("no key answers 402 with purchase terms", code == 402 && bytes.Contains(body, []byte(`"payment_required"`)),

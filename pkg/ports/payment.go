@@ -39,16 +39,18 @@ type PaymentProvider interface {
 	Start(ctx context.Context, req PurchaseRequest) (*Purchase, error)
 }
 
-// Trial gives free keys to wallets on the tester allowlist.
+// Trial gives free keys to wallets on the tester allowlist, or to any
+// wallet when Open (the public beta).
 type Trial struct {
 	On        bool
+	Open      bool
 	Days      int
 	allowlist map[common.Address]bool
 }
 
 // NewTrial parses a comma- or whitespace-separated list of addresses.
-func NewTrial(on bool, days int, allowlist string) *Trial {
-	t := &Trial{On: on, Days: days, allowlist: map[common.Address]bool{}}
+func NewTrial(on, open bool, days int, allowlist string) *Trial {
+	t := &Trial{On: on, Open: open, Days: days, allowlist: map[common.Address]bool{}}
 	for _, a := range strings.FieldsFunc(allowlist, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' }) {
 		if common.IsHexAddress(a) {
 			t.allowlist[common.HexToAddress(a)] = true
@@ -59,13 +61,17 @@ func NewTrial(on bool, days int, allowlist string) *Trial {
 
 func (t *Trial) Name() string                  { return "trial" }
 func (t *Trial) Enabled() bool                 { return t.On }
-func (t *Trial) Allowed(a common.Address) bool { return t.allowlist[a] }
+func (t *Trial) Allowed(a common.Address) bool { return t.Open || t.allowlist[a] }
+
+// Listed reports whether the wallet is on the allowlist (first-party bots
+// and tests), which skips the open-trial limits.
+func (t *Trial) Listed(a common.Address) bool { return t.allowlist[a] }
 
 func (t *Trial) Start(_ context.Context, req PurchaseRequest) (*Purchase, error) {
 	if !t.On {
 		return nil, ErrPaymentsDisabled
 	}
-	if !t.allowlist[req.Wallet] {
+	if !t.Allowed(req.Wallet) {
 		return nil, ErrNotEligible
 	}
 	return &Purchase{Plan: "trial", ValidDays: t.Days, PaymentRef: "trial:" + req.OrderID}, nil

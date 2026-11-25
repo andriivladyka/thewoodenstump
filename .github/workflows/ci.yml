@@ -1,6 +1,6 @@
 # Tests every change (including govulncheck); on main, builds one image per
 # service, pushes it to GHCR, signs it with cosign (keyless) and scans it
-# with Trivy, then verifies the signatures and pins the new digests for lab,
+# with Trivy, then verifies the signatures and pins the new digests for the beta,
 # which Flux deploys.
 # GitHub-hosted runners only: never attach a self-hosted runner to this
 # public repo.
@@ -87,13 +87,13 @@ jobs:
           exit-code: "1"
           skip-setup-trivy: true
 
-  deploy-lab:
+  deploy-beta:
     needs: images
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: read
-    concurrency: deploy-lab
+    concurrency: deploy-beta
     steps:
       - uses: actions/checkout@v7
         with:
@@ -104,12 +104,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: sigstore/cosign-installer@v4.1.4
-      - name: Verify signatures and pin image digests for lab
+      - name: Verify signatures and pin image digests for the beta
         env:
           REPO: ghcr.io/${{ github.repository }}
           IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yml@refs/heads/main
         run: |
-          cd deploy/apps/lab
+          cd deploy/apps/beta
           for s in edge-auth billing issuer board trust anchor mcp web smoke bots reset; do
             digest=$(docker buildx imagetools inspect "$REPO/$s:sha-$GITHUB_SHA" --format '{{json .Manifest}}' | jq -r .digest)
             cosign verify "$REPO/$s@$digest" --certificate-identity "$IDENTITY" \
@@ -118,6 +118,6 @@ jobs:
           done
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qam "lab: deploy ${GITHUB_SHA::7}" || exit 0
+          git commit -qam "beta: deploy ${GITHUB_SHA::7}" || exit 0
           git pull -q --rebase origin main
           git push -q origin HEAD:main

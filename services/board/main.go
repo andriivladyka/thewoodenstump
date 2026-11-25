@@ -59,6 +59,10 @@ func main() {
 			posted_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS messages_board_time ON messages (board, posted_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS messages_expiry ON messages (expires_at)`,
+		// Operator takedowns, kept so a removed message answers 410 with the reason.
+		`CREATE TABLE IF NOT EXISTS removals (
+			id text PRIMARY KEY, board text NOT NULL, sender text NOT NULL, reason text NOT NULL,
+			removed_at timestamptz NOT NULL DEFAULT now())`,
 		`INSERT INTO boards VALUES
 			('general', 'General', 'Anything that fits nowhere else'),
 			('api-status', 'API status', 'Outages, degradations and recoveries of public APIs'),
@@ -88,6 +92,10 @@ func main() {
 	app.Mux.HandleFunc("POST /v1/boards/{slug}/messages", b.post)
 	app.Mux.HandleFunc("GET /v1/boards/{slug}/stream", b.stream)
 	app.Mux.HandleFunc("GET /v1/messages/{id}", b.get)
+	// Operator only: not routed by Traefik, reached with kubectl port-forward.
+	app.Mux.HandleFunc("POST /internal/messages/{id}/remove", b.removeMessage)
+	app.Mux.HandleFunc("POST /internal/senders/{wallet}/remove", b.removeSender)
+	app.Mux.HandleFunc("GET /internal/removals", b.removals)
 	app.Serve()
 }
 
@@ -181,6 +189,11 @@ func (b *board) messages(w http.ResponseWriter, r *http.Request) {
 func (b *board) get(w http.ResponseWriter, r *http.Request) {
 	m, err := scan(b.db.QueryRow(r.Context(), `SELECT `+cols+` FROM messages WHERE id=$1`, r.PathValue("id")))
 	if errors.Is(err, pgx.ErrNoRows) {
+		var reason string
+		if b.db.QueryRow(r.Context(), `SELECT reason FROM removals WHERE id=$1`, r.PathValue("id")).Scan(&reason) == nil {
+			stump.JSON(w, 410, stump.Problem{Error: "removed", Message: "removed by the operator", Detail: map[string]string{"reason": reason}})
+			return
+		}
 		stump.Error(w, 404, "not_found", "unknown or expired message")
 		return
 	} else if err != nil {
@@ -264,6 +277,104 @@ func (b *board) post(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("event not published", "id", id, "err", err)
 	}
 	stump.JSON(w, 201, out)
+}
+
+type removeRequest struct {
+	Reason string `json:"reason"`
+}
+
+func readReason(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var req removeRequest
+	if err := stump.ReadJSON(r, 1024, &req); err != nil || req.Reason == "" {
+		stump.Error(w, 400, "bad_request", "reason is required")
+		return "", false
+	}
+	return req.Reason, true
+}
+
+// remove deletes the messages a query selects and records each takedown.
+func (b *board) remove(r *http.Request, reason, where string, arg any) ([]string, error) {
+	rows, err := b.db.Query(r.Context(), `WITH gone AS (DELETE FROM messages WHERE `+where+` RETURNING id, board, sender)
+		INSERT INTO removals (id, board, sender, reason) SELECT id, board, sender, $2 FROM gone
+		ON CONFLICT (id) DO NOTHING RETURNING id, board`, arg, reason)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id, slug string
+		rows.Scan(&id, &slug)
+		ids = append(ids, id)
+		ev, _ := json.Marshal(map[string]any{"id": id, "board": slug, "reason": reason, "at": time.Now().Unix()})
+		if _, err := b.js.Publish(r.Context(), "stump.board.message.removed."+slug, ev); err != nil {
+			slog.Warn("event not published", "id", id, "err", err)
+		}
+	}
+	return ids, rows.Err()
+}
+
+func (b *board) removeMessage(w http.ResponseWriter, r *http.Request) {
+	reason, ok := readReason(w, r)
+	if !ok {
+		return
+	}
+	ids, err := b.remove(r, reason, `id=$1`, r.PathValue("id"))
+	if err != nil {
+		stump.Error(w, 500, "remove_failed", err.Error())
+		return
+	}
+	if len(ids) == 0 {
+		stump.Error(w, 404, "not_found", "unknown, expired or already removed")
+		return
+	}
+	slog.Info("message removed", "id", ids[0], "reason", reason)
+	stump.JSON(w, 200, map[string]any{"removed": ids})
+}
+
+func (b *board) removeSender(w http.ResponseWriter, r *http.Request) {
+	reason, ok := readReason(w, r)
+	if !ok {
+		return
+	}
+	wallet := r.PathValue("wallet")
+	if !common.IsHexAddress(wallet) {
+		stump.Error(w, 400, "bad_wallet", "not an address")
+		return
+	}
+	ids, err := b.remove(r, reason, `lower(sender)=lower($1)`, wallet)
+	if err != nil {
+		stump.Error(w, 500, "remove_failed", err.Error())
+		return
+	}
+	slog.Info("sender's messages removed", "sender", common.HexToAddress(wallet).Hex(), "count", len(ids), "reason", reason)
+	stump.JSON(w, 200, map[string]any{"removed": ids})
+}
+
+func (b *board) removals(w http.ResponseWriter, r *http.Request) {
+	rows, err := b.db.Query(r.Context(), `SELECT id, board, sender, reason, removed_at FROM removals
+		ORDER BY removed_at DESC LIMIT 200`)
+	if err != nil {
+		stump.Error(w, 500, "query_failed", err.Error())
+		return
+	}
+	defer rows.Close()
+	type entry struct {
+		ID        string `json:"id"`
+		Board     string `json:"board"`
+		Sender    string `json:"sender"`
+		Reason    string `json:"reason"`
+		RemovedAt int64  `json:"removed_at"`
+	}
+	out := []entry{}
+	for rows.Next() {
+		var e entry
+		var at time.Time
+		rows.Scan(&e.ID, &e.Board, &e.Sender, &e.Reason, &at)
+		e.RemovedAt = at.Unix()
+		out = append(out, e)
+	}
+	stump.JSON(w, 200, map[string]any{"removals": out})
 }
 
 func (b *board) stream(w http.ResponseWriter, r *http.Request) {

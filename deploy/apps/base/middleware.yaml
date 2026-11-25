@@ -15,3 +15,42 @@ spec:
       - X-Stump-Agent
       - X-Stump-Plan
       - X-Stump-Credential-Id
+---
+# Per-client limits on every public route, keyed on the address Cloudflare
+# reports (CF-Connecting-IP); requests without it (LAN, in-cluster) share
+# one bucket. edge-auth's daily per-key limits come on top.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: client-limits
+  namespace: stump
+spec:
+  chain:
+    middlewares:
+      - name: client-rate
+      - name: client-inflight
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: client-rate
+  namespace: stump
+spec:
+  rateLimit:
+    average: 10
+    period: 1s
+    burst: 40
+    sourceCriterion:
+      requestHeaderName: CF-Connecting-IP
+---
+# Caps open requests, which also caps long-lived event streams per client.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: client-inflight
+  namespace: stump
+spec:
+  inFlightReq:
+    amount: 10
+    sourceCriterion:
+      requestHeaderName: CF-Connecting-IP
