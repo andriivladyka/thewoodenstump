@@ -35,20 +35,17 @@ spec:
           default: false
       websecure:
         exposedPort: 443
-    service:
-      type: LoadBalancer
     ingressClass:
       enabled: true
       isDefaultClass: true
     providers:
       kubernetesCRD:
         allowCrossNamespace: false
-    logs:
-      general:
-        format: json
-      access:
-        enabled: true
-        format: json
+    log:
+      format: json
+    accessLog:
+      enabled: true
+      format: json
     metrics:
       prometheus:
         entryPoint: metrics
