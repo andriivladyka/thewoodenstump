@@ -1,0 +1,26 @@
+# Lab: Garage runs on the host and is reached through the pod bridge address.
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3-backups
+  namespace: data
+spec:
+  ports:
+    - name: s3
+      port: 3900
+      targetPort: 3900
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: s3-backups-host
+  namespace: data
+  labels:
+    kubernetes.io/service-name: s3-backups
+addressType: IPv4
+ports:
+  - name: s3
+    port: 3900
+    protocol: TCP
+endpoints:
+  - addresses: ["10.42.0.1"]

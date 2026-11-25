@@ -1,0 +1,107 @@
+# One Postgres for all services. Each service has its own role and a schema
+# it owns, in the shared database "stump". Role passwords come from Secrets
+# pg-<service> that each host creates.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: stump-pg
+  namespace: data
+spec:
+  instances: 1
+  storage:
+    size: 20Gi
+    storageClass: local-path
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 1Gi }
+  postgresql:
+    parameters:
+      shared_buffers: 256MB
+      max_connections: "200"
+  bootstrap:
+    initdb:
+      database: stump
+      owner: stump
+  managed:
+    roles:
+      - name: edge_auth
+        ensure: present
+        login: true
+        passwordSecret:
+          name: pg-edge-auth
+      - name: billing
+        ensure: present
+        login: true
+        passwordSecret:
+          name: pg-billing
+      - name: issuer
+        ensure: present
+        login: true
+        passwordSecret:
+          name: pg-issuer
+      - name: board
+        ensure: present
+        login: true
+        passwordSecret:
+          name: pg-board
+      - name: trust
+        ensure: present
+        login: true
+        passwordSecret:
+          name: pg-trust
+      - name: anchor
+        ensure: present
+        login: true
+        passwordSecret:
+          name: pg-anchor
+      - name: mcp
+        ensure: present
+        login: true
+        passwordSecret:
+          name: pg-mcp
+      - name: web
+        ensure: present
+        login: true
+        passwordSecret:
+          name: pg-web
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: backups
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: stump
+  namespace: data
+spec:
+  name: stump
+  owner: stump
+  cluster:
+    name: stump-pg
+  schemas:
+    - name: edge_auth
+      owner: edge_auth
+      ensure: present
+    - name: billing
+      owner: billing
+      ensure: present
+    - name: issuer
+      owner: issuer
+      ensure: present
+    - name: board
+      owner: board
+      ensure: present
+    - name: trust
+      owner: trust
+      ensure: present
+    - name: anchor
+      owner: anchor
+      ensure: present
+    - name: mcp
+      owner: mcp
+      ensure: present
+    - name: web
+      owner: web
+      ensure: present

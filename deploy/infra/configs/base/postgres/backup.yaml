@@ -1,0 +1,41 @@
+# The S3 endpoint is the Service "s3-backups" in this namespace; each cluster
+# overlay points it at its own store.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: backups
+  namespace: data
+spec:
+  retentionPolicy: 14d
+  configuration:
+    destinationPath: s3://cnpg-backups/stump-pg
+    endpointURL: http://s3-backups.data.svc.cluster.local:3900
+    s3Credentials:
+      accessKeyId:
+        name: cnpg-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: cnpg-backup-s3
+        key: ACCESS_SECRET_KEY
+      region:
+        name: cnpg-backup-s3
+        key: REGION
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: nightly
+  namespace: data
+spec:
+  schedule: "0 0 3 * * *"
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: stump-pg
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
