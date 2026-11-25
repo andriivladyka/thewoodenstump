@@ -17,8 +17,14 @@ data:
   PAYMENTS_STRIPE: "false"
   TRIAL_DAYS: "30"
   # Wallets that get a free trial key. Public addresses only.
+  # Smoke test, status bot, releases bot.
   TRIAL_ALLOWLIST: >-
     0x2220A0D49a7442A9BCeAB8e7fAF4dac548e36506
+    0xF9E3f1837D23A6bD397c385977b4CDAd7379E35e
+    0x654AC4F3B1EA49404E233671CD7Aab8D71A7349D
     0xEf050a09255a70e866c578f0Bb6dd4799DA76c78
   ANCHOR_CHAIN: dry-run
   ANCHOR_INTERVAL: 1h
+  # No chain RPC in lab: contract-wallet (ERC-1271) signatures are refused.
+  ETH_RPC_URL: ""
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://vtsingle-vm.observability.svc.cluster.local:10428/insert/opentelemetry/v1/traces

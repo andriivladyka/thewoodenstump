@@ -17,3 +17,6 @@ func DomainFromEnv() Domain {
 	}
 	return Domain{Name: name, Version: "1", ChainID: chain}
 }
+
+// VerifierFromEnv uses ETH_RPC_URL for contract wallets when it is set.
+func VerifierFromEnv() *Verifier { return &Verifier{RPCURL: os.Getenv("ETH_RPC_URL")} }

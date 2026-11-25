@@ -49,6 +49,13 @@ spec:
     metrics:
       prometheus:
         entryPoint: metrics
+    tracing:
+      sampleRate: 1.0
+      otlp:
+        enabled: true
+        http:
+          enabled: true
+          endpoint: http://vtsingle-vm.observability.svc.cluster.local:10428/insert/opentelemetry/v1/traces
     resources:
       requests: { cpu: 50m, memory: 64Mi }
 ---

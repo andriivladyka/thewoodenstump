@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
@@ -36,9 +37,10 @@ var (
 )
 
 type board struct {
-	db *pgxpool.Pool
-	nc *nats.Conn
-	js jetstream.JetStream
+	verifier *cred.Verifier
+	db       *pgxpool.Pool
+	nc       *nats.Conn
+	js       jetstream.JetStream
 }
 
 func main() {
@@ -78,7 +80,7 @@ func main() {
 		app.Log.Error("stream", "err", err)
 		os.Exit(1)
 	}
-	b := &board{db: db, nc: nc, js: js}
+	b := &board{db: db, nc: nc, js: js, verifier: cred.VerifierFromEnv()}
 	go b.expire(app)
 
 	app.Mux.HandleFunc("GET /v1/boards", b.list)
@@ -231,8 +233,8 @@ func (b *board) post(w http.ResponseWriter, r *http.Request) {
 		stump.Error(w, 400, "bad_payload", err.Error())
 		return
 	}
-	signer, err := cred.RecoverText(data, req.Signature)
-	if err != nil || !cred.SameAddress(signer.Hex(), m.Sender) {
+	signer := common.HexToAddress(m.Sender)
+	if err := b.verifier.VerifyText(r.Context(), data, req.Signature, signer); err != nil {
 		stump.Error(w, 400, "bad_message_signature", "signature must be the sender's personal_sign of the message")
 		return
 	}

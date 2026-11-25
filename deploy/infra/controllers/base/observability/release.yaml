@@ -9,7 +9,8 @@ spec:
 ---
 # Metrics: VictoriaMetrics single node, vmagent, node-exporter, kube-state-metrics.
 # Logs: VictoriaLogs single node, with vlagent collecting pod logs.
-# Grafana with both as datasources. No alerting yet.
+# Traces: VictoriaTraces single node; services and Traefik send OTLP to it.
+# Grafana with all three as datasources. No alerting yet.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -65,6 +66,18 @@ spec:
         resources:
           requests: { cpu: 20m, memory: 128Mi }
           limits: { memory: 1Gi }
+    vtsingle:
+      enabled: true
+      spec:
+        retentionPeriod: 7d
+        storage:
+          storageClassName: local-path
+          resources:
+            requests:
+              storage: 5Gi
+        resources:
+          requests: { cpu: 20m, memory: 64Mi }
+          limits: { memory: 512Mi }
     vlagent:
       enabled: true
       rbac:

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard", ":semanticCommitsDisabled"],
+  "timezone": "America/Los_Angeles",
+  "schedule": ["before 6am on monday"],
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 5,
+  "postUpdateOptions": ["gomodTidy"],
+  "flux": {
+    "managerFilePatterns": ["/^deploy/.+\\.ya?ml$/"]
+  },
+  "kubernetes": {
+    "managerFilePatterns": ["/^deploy/.+\\.ya?ml$/"]
+  },
+  "customManagers": [
+    {
+      "description": "CloudNativePG cluster image (imageName field)",
+      "customType": "regex",
+      "managerFilePatterns": ["/^deploy/infra/configs/.+\\.ya?ml$/"],
+      "matchStrings": ["imageName: (?<depName>ghcr\\.io/cloudnative-pg/postgresql):(?<currentValue>\\S+)"],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)-(?<compatibility>.+)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Our own images are pinned by CI, not Renovate",
+      "matchPackageNames": ["ghcr.io/andriivladyka/thewoodenstump/**"],
+      "enabled": false
+    },
+    { "matchManagers": ["gomod"], "groupName": "Go modules" },
+    { "matchManagers": ["github-actions"], "groupName": "GitHub Actions" },
+    { "matchManagers": ["dockerfile"], "groupName": "Dockerfile base images" },
+    {
+      "description": "Platform charts one at a time, so a lab soak can catch problems",
+      "matchManagers": ["flux"],
+      "separateMinorPatch": true
+    },
+    {
+      "description": "Major updates wait for approval on the dependency dashboard",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Postgres major versions need a planned upgrade",
+      "matchPackageNames": ["ghcr.io/cloudnative-pg/postgresql"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    }
+  ]
+}

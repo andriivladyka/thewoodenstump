@@ -60,7 +60,7 @@ type VouchIn struct {
 func main() {
 	app := stump.New("mcp")
 	a := &api{base: strings.TrimRight(stump.Env("API_URL", "http://traefik-internal.traefik.svc.cluster.local"), "/"),
-		host: stump.Env("API_HOST", "stump.lab.internal"), http: &http.Client{Timeout: 15 * time.Second}}
+		host: stump.Env("API_HOST", "stump.lab.internal"), http: stump.HTTPClient(15 * time.Second)}
 
 	s := mcp.NewServer(&mcp.Implementation{Name: "the-wooden-stump", Version: "0.1.0"}, nil)
 	mcp.AddTool(s, &mcp.Tool{Name: "buy_key",

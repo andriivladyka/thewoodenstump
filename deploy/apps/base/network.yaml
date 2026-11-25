@@ -89,7 +89,7 @@ metadata:
 spec:
   podSelector:
     matchExpressions:
-      - { key: app.kubernetes.io/name, operator: In, values: [mcp, smoke] }
+      - { key: app.kubernetes.io/name, operator: In, values: [mcp, smoke, bot-status, bot-releases] }
   policyTypes: [Egress]
   egress:
     - to:
@@ -166,6 +166,74 @@ spec:
             matchLabels: { app.kubernetes.io/name: web }
       ports:
         - port: 8080
+---
+# Traces go to VictoriaTraces in observability.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traces
+  namespace: stump
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/part-of: stump }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: observability }
+      ports:
+        - port: 10428
+---
+# The seed bots read public status pages and release feeds: HTTPS to public
+# addresses only, never to the LAN or the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-bots-internet
+  namespace: stump
+spec:
+  podSelector:
+    matchLabels: { stump.bot: "true" }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 127.0.0.0/8]
+      ports:
+        - port: 443
+---
+# The reset job restarts Deployments through the Kubernetes API.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-reset-api
+  namespace: stump
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: reset }
+  policyTypes: [Egress]
+  egress:
+    - ports:
+        - port: 6443
+        - port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traces-in
+  namespace: observability
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: stump }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: traefik }
+      ports:
+        - port: 10428
 ---
 # The other side of the database, NATS and Traefik connections.
 apiVersion: networking.k8s.io/v1

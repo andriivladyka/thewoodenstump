@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Env returns the variable or def when it is unset.
@@ -58,11 +59,12 @@ func EnvDuration(key string, def time.Duration) time.Duration {
 
 // App is one service process.
 type App struct {
-	Name string
-	Log  *slog.Logger
-	Mux  *http.ServeMux
-	ctx  context.Context
-	stop context.CancelFunc
+	Name     string
+	Log      *slog.Logger
+	Mux      *http.ServeMux
+	ctx      context.Context
+	stop     context.CancelFunc
+	shutdown func(context.Context) error
 }
 
 // New sets up JSON logging and a context cancelled on SIGTERM.
@@ -70,7 +72,8 @@ func New(name string) *App {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", name)
 	slog.SetDefault(log)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	a := &App{Name: name, Log: log, Mux: http.NewServeMux(), ctx: ctx, stop: stop}
+	a := &App{Name: name, Log: log, Mux: http.NewServeMux(), ctx: ctx, stop: stop,
+		shutdown: initTracing(ctx, name)}
 	a.Mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("ok\n"))
 	})
@@ -88,7 +91,7 @@ func (a *App) Serve() {
 	defer a.stop()
 	srv := &http.Server{
 		Addr:              Env("STUMP_LISTEN", ":8080"),
-		Handler:           a.instrument(a.Mux),
+		Handler:           traced(a.Name, a.instrument(a.Mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -98,7 +101,11 @@ func (a *App) Serve() {
 		srv.Shutdown(ctx)
 	}()
 	a.Log.Info("listening", "addr", srv.Addr)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	err := srv.ListenAndServe()
+	flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	a.shutdown(flush)
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		a.Log.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
@@ -125,6 +132,10 @@ func (a *App) instrument(h http.Handler) http.Handler {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, code: 200}
 		h.ServeHTTP(sw, r)
+		// The mux has set r.Pattern by now, so name the span by route.
+		if r.Pattern != "" {
+			trace.SpanFromContext(r.Context()).SetName(r.Pattern)
+		}
 		metrics.GetOrCreateCounter(fmt.Sprintf(`stump_http_requests_total{service=%q,method=%q,code="%d"}`, a.Name, r.Method, sw.code)).Inc()
 		metrics.GetOrCreateHistogram(fmt.Sprintf(`stump_http_request_duration_seconds{service=%q}`, a.Name)).UpdateDuration(start)
 	})

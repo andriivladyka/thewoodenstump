@@ -34,6 +34,7 @@ type auth struct {
 	readLimit  int
 	writeLimit int
 	skew       time.Duration
+	verifier   *cred.Verifier
 
 	mu     sync.Mutex
 	status map[string]cachedStatus
@@ -49,8 +50,9 @@ func main() {
 	ctx := app.Context()
 	a := &auth{pub: stump.PublicFromEnv(), domain: cred.DomainFromEnv(),
 		issuerURL: stump.Env("ISSUER_URL", "http://issuer:8080"),
-		http:      &http.Client{Timeout: 5 * time.Second},
-		status:    map[string]cachedStatus{}, skew: 5 * time.Minute}
+		http:      stump.HTTPClient(5 * time.Second),
+		status:    map[string]cachedStatus{}, skew: 5 * time.Minute,
+		verifier: cred.VerifierFromEnv()}
 	a.readLimit, _ = strconv.Atoi(stump.Env("LIMIT_READS_PER_DAY", "5000"))
 	a.writeLimit, _ = strconv.Atoi(stump.Env("LIMIT_WRITES_PER_DAY", "500"))
 
@@ -134,8 +136,8 @@ func (a *auth) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sig := r.Header.Get(cred.HeaderSignature)
-	signer, err := cred.RecoverText(cred.RequestPayload(method, uri, ts, body), sig)
-	if err != nil || signer != common.HexToAddress(c.Subject) {
+	signer := common.HexToAddress(c.Subject)
+	if err := a.verifier.VerifyText(r.Context(), cred.RequestPayload(method, uri, ts, body), sig, signer); err != nil {
 		a.deny(w, 401, "bad_signature", "X-Stump-Signature must be the credential subject's signature of this request")
 		return
 	}

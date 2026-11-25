@@ -29,7 +29,7 @@ spec:
         - name: board
           port: 8080
     - kind: Rule
-      match: Host(`stump.lab.internal`) && (PathPrefix(`/v1/vouches`) || PathPrefix(`/v1/flags`) || PathPrefix(`/v1/trust-paths`))
+      match: Host(`stump.lab.internal`) && (PathPrefix(`/v1/vouches`) || PathPrefix(`/v1/flags`) || PathPrefix(`/v1/trust-paths`) || PathPrefix(`/v1/delegations`))
       priority: 100
       middlewares:
         - name: edge-auth
@@ -88,7 +88,7 @@ spec:
         - name: board
           port: 8080
     - kind: Rule
-      match: Host(`stump.lab.internal`) && (PathPrefix(`/v1/vouches`) || PathPrefix(`/v1/flags`) || PathPrefix(`/v1/trust-paths`))
+      match: Host(`stump.lab.internal`) && (PathPrefix(`/v1/vouches`) || PathPrefix(`/v1/flags`) || PathPrefix(`/v1/trust-paths`) || PathPrefix(`/v1/delegations`))
       priority: 100
       middlewares:
         - name: edge-auth

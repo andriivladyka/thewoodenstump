@@ -237,7 +237,27 @@ func (c *client) run() {
 	code, _, _ = c.do("DELETE", fmt.Sprintf("/v1/vouches/%d", vr.ID), nil, true)
 	check("vouch revoked", code == 200, fmt.Sprintf("HTTP %d", code))
 
-	// 10. MCP
+	// 10. Delegation: an owner wallet (without a key of its own) vouches
+	// for this agent as part of its fleet, then revokes it.
+	owner := cred.GenerateKeySigner()
+	d := cred.Delegation{Owner: owner.Address().Hex(), Agent: c.wallet.Address().Hex(),
+		ExpiresAt: time.Now().Add(time.Hour).Unix(), Nonce: fmt.Sprint(time.Now().UnixNano())}
+	dsig, _ := cred.SignText(owner, d.SigningBytes())
+	db, _ := json.Marshal(map[string]any{"delegation": d, "owner_signature": dsig})
+	code, body, _ = c.do("POST", "/v1/delegations", db, true)
+	var dr struct {
+		ID int64 `json:"id"`
+	}
+	json.Unmarshal(body, &dr)
+	check("delegation registered", code == 201 && dr.ID > 0, fmt.Sprintf("HTTP %d %s", code, short(body)))
+	code, body, _ = c.do("GET", fmt.Sprintf("/v1/trust-paths?from=%s&to=%s", owner.Address().Hex(), c.wallet.Address().Hex()), nil, true)
+	check("trust path runs through the delegation", code == 200 && bytes.Contains(body, []byte(`"delegation_id"`)), fmt.Sprintf("HTTP %d", code))
+	rsig2, _ := cred.SignText(owner, cred.RevokeDelegationBytes(dr.ID))
+	rb, _ := json.Marshal(map[string]string{"owner_signature": rsig2})
+	code, body, _ = c.do("POST", fmt.Sprintf("/v1/delegations/%d/revoke", dr.ID), rb, true)
+	check("owner revoked the delegation", code == 200, fmt.Sprintf("HTTP %d %s", code, short(body)))
+
+	// 11. MCP
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	mc := mcp.NewClient(&mcp.Implementation{Name: "smoke", Version: "0.1.0"}, nil)

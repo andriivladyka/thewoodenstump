@@ -33,7 +33,7 @@ func main() {
 		issuerURL: stump.Env("ISSUER_URL", "http://issuer:8080"),
 		boardURL:  stump.Env("BOARD_URL", "http://board:8080"),
 		anchorURL: stump.Env("ANCHOR_URL", "http://anchor:8080"),
-		http:      &http.Client{Timeout: 5 * time.Second}}
+		http:      stump.HTTPClient(5 * time.Second)}
 	app.Mux.HandleFunc("GET /.well-known/agent-card.json", w.agentCard)
 	app.Mux.HandleFunc("GET /.well-known/terms.json", w.terms)
 	app.Mux.HandleFunc("GET /llms.txt", w.llms)

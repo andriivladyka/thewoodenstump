@@ -57,7 +57,7 @@ func main() {
 	}
 	b := &billing{db: db, pub: pub, trial: trial,
 		issuerURL: stump.Env("ISSUER_URL", "http://issuer:8080"),
-		http:      &http.Client{Timeout: 10 * time.Second},
+		http:      stump.HTTPClient(10 * time.Second),
 		rails: map[string]ports.PaymentProvider{
 			"trial":  trial,
 			"x402":   &ports.X402{On: pub.X402Enabled},

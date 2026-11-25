@@ -92,3 +92,28 @@ func mustHexOrDecimal(s string) *math.HexOrDecimal256 {
 
 // ParseTimestamp reads the X-Stump-Timestamp header.
 func ParseTimestamp(s string) (int64, error) { return strconv.ParseInt(s, 10, 64) }
+
+// Delegation is an owner wallet's signed statement that it runs an agent
+// wallet, so a fleet shares one reputation and can be revoked together.
+type Delegation struct {
+	Owner     string `json:"owner"`
+	Agent     string `json:"agent"`
+	ExpiresAt int64  `json:"expires_at"`
+	Nonce     string `json:"nonce"`
+}
+
+func (d Delegation) SigningBytes() []byte {
+	b, _ := json.Marshal(d)
+	return append([]byte("stump-delegation-v1\n"), b...)
+}
+
+// RevokeDelegationBytes is what an owner signs to revoke one delegation.
+func RevokeDelegationBytes(id int64) []byte {
+	return []byte(fmt.Sprintf("stump-delegation-revoke-v1\n%d", id))
+}
+
+// RevokeAllBytes is what an owner signs to revoke every delegation it made
+// up to time ts (unix seconds, within 10 minutes of the server's clock).
+func RevokeAllBytes(owner string, ts int64) []byte {
+	return []byte(fmt.Sprintf("stump-delegation-revoke-all-v1\n%s\n%d", owner, ts))
+}

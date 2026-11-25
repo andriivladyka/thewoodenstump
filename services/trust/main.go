@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 const (
 	maxActiveVouches = 5
 	maxHops          = 3
+	maxDelegations   = 50
 )
 
 var (
@@ -31,8 +33,9 @@ var (
 )
 
 type trust struct {
-	db *pgxpool.Pool
-	nc *nats.Conn
+	verifier *cred.Verifier
+	db       *pgxpool.Pool
+	nc       *nats.Conn
 }
 
 func main() {
@@ -54,6 +57,13 @@ func main() {
 			id bigserial PRIMARY KEY, flagger text NOT NULL, subject text NOT NULL, reason text NOT NULL,
 			note text NOT NULL, signature text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`,
 		`CREATE INDEX IF NOT EXISTS flags_subject ON flags (subject)`,
+		`CREATE TABLE IF NOT EXISTS delegations (
+			id bigserial PRIMARY KEY, owner text NOT NULL, agent text NOT NULL,
+			expires_at timestamptz NOT NULL, nonce text NOT NULL, owner_signature text NOT NULL,
+			created_at timestamptz NOT NULL DEFAULT now(), revoked_at timestamptz,
+			UNIQUE (owner, nonce))`,
+		`CREATE INDEX IF NOT EXISTS delegations_owner ON delegations (owner) WHERE revoked_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS delegations_agent ON delegations (agent) WHERE revoked_at IS NULL`,
 	); err != nil {
 		app.Log.Error("migrate", "err", err)
 		os.Exit(1)
@@ -62,13 +72,17 @@ func main() {
 	if err != nil {
 		os.Exit(1)
 	}
-	t := &trust{db: db, nc: nc}
+	t := &trust{db: db, nc: nc, verifier: cred.VerifierFromEnv()}
 	app.Mux.HandleFunc("POST /v1/vouches", t.vouch)
 	app.Mux.HandleFunc("GET /v1/vouches", t.listVouches)
 	app.Mux.HandleFunc("DELETE /v1/vouches/{id}", t.revoke)
 	app.Mux.HandleFunc("POST /v1/flags", t.flag)
 	app.Mux.HandleFunc("GET /v1/flags", t.listFlags)
 	app.Mux.HandleFunc("GET /v1/trust-paths", t.paths)
+	app.Mux.HandleFunc("POST /v1/delegations", t.delegate)
+	app.Mux.HandleFunc("GET /v1/delegations", t.listDelegations)
+	app.Mux.HandleFunc("POST /v1/delegations/{id}/revoke", t.revokeDelegation)
+	app.Mux.HandleFunc("POST /v1/delegations/revoke-all", t.revokeAll)
 	app.Serve()
 }
 
@@ -109,7 +123,7 @@ func (t *trust) vouch(w http.ResponseWriter, r *http.Request) {
 		stump.Error(w, 400, "bad_nonce", "")
 		return
 	}
-	if s, err := cred.RecoverText(v.SigningBytes(), req.Signature); err != nil || !cred.SameAddress(s.Hex(), v.Voucher) {
+	if err := t.verifier.VerifyText(r.Context(), v.SigningBytes(), req.Signature, common.HexToAddress(v.Voucher)); err != nil {
 		stump.Error(w, 400, "bad_vouch_signature", "signature must be the voucher's personal_sign of the vouch")
 		return
 	}
@@ -209,7 +223,7 @@ func (t *trust) flag(w http.ResponseWriter, r *http.Request) {
 		stump.Error(w, 400, "note_too_long", "")
 		return
 	}
-	if s, err := cred.RecoverText(f.SigningBytes(), req.Signature); err != nil || !cred.SameAddress(s.Hex(), f.Flagger) {
+	if err := t.verifier.VerifyText(r.Context(), f.SigningBytes(), req.Signature, common.HexToAddress(f.Flagger)); err != nil {
 		stump.Error(w, 400, "bad_flag_signature", "")
 		return
 	}
@@ -267,19 +281,38 @@ func (t *trust) paths(w http.ResponseWriter, r *http.Request) {
 		stump.Error(w, 500, "db", err.Error())
 		return
 	}
+	// Edges are vouches, plus both directions of each delegation: an owner
+	// stands for its agents and each agent for its owner, so a fleet shares
+	// one reputation.
 	type edge struct {
-		ID      int64  `json:"vouch_id"`
-		Voucher string `json:"voucher"`
-		Subject string `json:"subject"`
-		Scope   string `json:"scope"`
+		Kind         string `json:"kind"`
+		ID           int64  `json:"vouch_id,omitempty"`
+		DelegationID int64  `json:"delegation_id,omitempty"`
+		Voucher      string `json:"voucher"`
+		Subject      string `json:"subject"`
+		Scope        string `json:"scope"`
 	}
 	out := map[string][]edge{}
 	for rows.Next() {
-		var e edge
+		e := edge{Kind: "vouch"}
 		rows.Scan(&e.ID, &e.Voucher, &e.Subject, &e.Scope)
 		out[e.Voucher] = append(out[e.Voucher], e)
 	}
 	rows.Close()
+	drows, err := t.db.Query(r.Context(), `SELECT id, owner, agent FROM delegations
+		WHERE revoked_at IS NULL AND expires_at > now()`)
+	if err != nil {
+		stump.Error(w, 500, "db", err.Error())
+		return
+	}
+	for drows.Next() {
+		var id int64
+		var owner, agent string
+		drows.Scan(&id, &owner, &agent)
+		out[owner] = append(out[owner], edge{Kind: "delegation", DelegationID: id, Voucher: owner, Subject: agent, Scope: "operates"})
+		out[agent] = append(out[agent], edge{Kind: "delegation", DelegationID: id, Voucher: agent, Subject: owner, Scope: "operated-by"})
+	}
+	drows.Close()
 	target := norm(to)
 	var found [][]edge
 	var walk func(at string, path []edge, seen map[string]bool)
@@ -310,4 +343,136 @@ func (t *trust) paths(w http.ResponseWriter, r *http.Request) {
 		found = [][]edge{}
 	}
 	stump.JSON(w, 200, map[string]any{"to": target, "from": anchors, "max_hops": maxHops, "paths": found})
+}
+
+func (t *trust) delegate(w http.ResponseWriter, r *http.Request) {
+	agent := r.Header.Get(cred.HeaderAgent)
+	var req struct {
+		Delegation     cred.Delegation `json:"delegation"`
+		OwnerSignature string          `json:"owner_signature"`
+	}
+	if err := stump.ReadJSON(r, 4096, &req); err != nil {
+		stump.Error(w, 400, "bad_request", err.Error())
+		return
+	}
+	d := req.Delegation
+	switch {
+	case agent == "" || !cred.SameAddress(d.Agent, agent):
+		stump.Error(w, 403, "agent_mismatch", "the agent wallet registers its own delegation: delegation.agent must be the wallet that signed the request")
+		return
+	case !common.IsHexAddress(d.Owner) || cred.SameAddress(d.Owner, d.Agent):
+		stump.Error(w, 400, "bad_owner", "owner must be another wallet")
+		return
+	case d.ExpiresAt <= time.Now().Unix() || d.ExpiresAt > time.Now().Add(366*24*time.Hour).Unix():
+		stump.Error(w, 400, "bad_expiry", "expires_at must be within the next year")
+		return
+	case d.Nonce == "" || len(d.Nonce) > 64:
+		stump.Error(w, 400, "bad_nonce", "")
+		return
+	}
+	if err := t.verifier.VerifyText(r.Context(), d.SigningBytes(), req.OwnerSignature, common.HexToAddress(d.Owner)); err != nil {
+		stump.Error(w, 400, "bad_owner_signature", "owner_signature must be the owner's personal_sign of the delegation")
+		return
+	}
+	var n int
+	t.db.QueryRow(r.Context(), `SELECT count(*) FROM delegations WHERE owner=$1 AND revoked_at IS NULL AND expires_at > now()`,
+		norm(d.Owner)).Scan(&n)
+	if n >= maxDelegations {
+		stump.Error(w, 409, "delegation_limit", "an owner may delegate to at most 50 agents")
+		return
+	}
+	var id int64
+	if err := t.db.QueryRow(r.Context(), `INSERT INTO delegations (owner, agent, expires_at, nonce, owner_signature)
+		VALUES ($1,$2,to_timestamp($3),$4,$5) RETURNING id`,
+		norm(d.Owner), norm(d.Agent), d.ExpiresAt, d.Nonce, req.OwnerSignature).Scan(&id); err != nil {
+		stump.Error(w, 409, "duplicate_delegation", "this nonce was already used")
+		return
+	}
+	t.publish("stump.trust.delegation.created", map[string]any{"id": id, "delegation": d})
+	stump.JSON(w, 201, map[string]any{"id": id, "delegation": d, "owner_signature": req.OwnerSignature})
+}
+
+func (t *trust) listDelegations(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	where, arg := "owner=$1", q.Get("owner")
+	if q.Get("agent") != "" {
+		where, arg = "agent=$1", q.Get("agent")
+	}
+	if !common.IsHexAddress(arg) {
+		stump.Error(w, 400, "bad_request", "give owner= or agent= as a wallet address")
+		return
+	}
+	rows, err := t.db.Query(r.Context(), `SELECT id, owner, agent, extract(epoch from expires_at)::bigint, nonce, owner_signature
+		FROM delegations WHERE `+where+` AND revoked_at IS NULL AND expires_at > now() ORDER BY id DESC LIMIT 100`, norm(arg))
+	if err != nil {
+		stump.Error(w, 500, "db", err.Error())
+		return
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id int64
+		var d cred.Delegation
+		var sig string
+		rows.Scan(&id, &d.Owner, &d.Agent, &d.ExpiresAt, &d.Nonce, &sig)
+		out = append(out, map[string]any{"id": id, "delegation": d, "owner_signature": sig})
+	}
+	stump.JSON(w, 200, map[string]any{"delegations": out})
+}
+
+// revokeDelegation needs the owner's signature, so an owner without a key
+// of its own can still cut an agent loose.
+func (t *trust) revokeDelegation(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		stump.Error(w, 400, "bad_id", "")
+		return
+	}
+	var req struct {
+		OwnerSignature string `json:"owner_signature"`
+	}
+	if err := stump.ReadJSON(r, 1024, &req); err != nil {
+		stump.Error(w, 400, "bad_request", err.Error())
+		return
+	}
+	var owner string
+	if err := t.db.QueryRow(r.Context(), `SELECT owner FROM delegations WHERE id=$1 AND revoked_at IS NULL`, id).Scan(&owner); err != nil {
+		stump.Error(w, 404, "not_found", "no active delegation with this id")
+		return
+	}
+	if err := t.verifier.VerifyText(r.Context(), cred.RevokeDelegationBytes(id), req.OwnerSignature, common.HexToAddress(owner)); err != nil {
+		stump.Error(w, 403, "bad_owner_signature", "sign stump-delegation-revoke-v1\\n<id> with the owner wallet")
+		return
+	}
+	t.db.Exec(r.Context(), `UPDATE delegations SET revoked_at=now() WHERE id=$1`, id)
+	t.publish("stump.trust.delegation.revoked", map[string]any{"id": id, "owner": owner})
+	stump.JSON(w, 200, map[string]any{"revoked": id})
+}
+
+func (t *trust) revokeAll(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Owner          string `json:"owner"`
+		Timestamp      int64  `json:"timestamp"`
+		OwnerSignature string `json:"owner_signature"`
+	}
+	if err := stump.ReadJSON(r, 1024, &req); err != nil || !common.IsHexAddress(req.Owner) {
+		stump.Error(w, 400, "bad_request", "owner, timestamp and owner_signature are required")
+		return
+	}
+	if time.Since(time.Unix(req.Timestamp, 0)).Abs() > 10*time.Minute {
+		stump.Error(w, 400, "bad_timestamp", "timestamp must be unix seconds within 10 minutes")
+		return
+	}
+	if err := t.verifier.VerifyText(r.Context(), cred.RevokeAllBytes(req.Owner, req.Timestamp), req.OwnerSignature, common.HexToAddress(req.Owner)); err != nil {
+		stump.Error(w, 403, "bad_owner_signature", "")
+		return
+	}
+	tag, err := t.db.Exec(r.Context(), `UPDATE delegations SET revoked_at=now()
+		WHERE owner=$1 AND revoked_at IS NULL AND created_at <= to_timestamp($2)`, norm(req.Owner), req.Timestamp)
+	if err != nil {
+		stump.Error(w, 500, "db", err.Error())
+		return
+	}
+	t.publish("stump.trust.delegation.revoked", map[string]any{"owner": norm(req.Owner), "all": true})
+	stump.JSON(w, 200, map[string]any{"revoked": tag.RowsAffected()})
 }
