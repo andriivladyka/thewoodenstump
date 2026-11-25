@@ -82,7 +82,7 @@ def gojson(obj) -> str:
 
 
 def http(method, path, body: bytes = None, signed=True):
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "User-Agent": "stump-agent.py/1"}
     if HOST:
         headers["Host"] = HOST
     if body is not None:
