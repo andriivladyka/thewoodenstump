@@ -122,6 +122,14 @@ func short(b []byte) string {
 }
 
 func (c *client) run() {
+	// A new pod's network policy can take a moment to apply.
+	for i := 0; i < 30; i++ {
+		if code, _, _ := c.do("GET", "/llms.txt", nil, false); code != 0 {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+
 	// 1. Discovery
 	code, body, _ := c.do("GET", "/.well-known/agent-card.json", nil, false)
 	var card struct {
