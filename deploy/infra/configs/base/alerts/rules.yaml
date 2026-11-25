@@ -11,7 +11,7 @@ spec:
     - name: public
       rules:
         - alert: TunnelDown
-          expr: max(cloudflared_tunnel_ha_connections) < 1 or absent(cloudflared_tunnel_ha_connections)
+          expr: max(last_over_time(cloudflared_tunnel_ha_connections[5m])) < 1 or absent_over_time(cloudflared_tunnel_ha_connections[5m])
           for: 3m
           labels: { severity: critical }
           annotations:
@@ -58,12 +58,20 @@ spec:
             summary: Postgres (stump-pg) is not answering.
             description: "Check: kubectl -n data get cluster,pods"
         - alert: PostgresBackupOld
-          expr: time() - max(cnpg_collector_last_available_backup_timestamp) > 30 * 3600
+          # Backups go through the Barman Cloud plugin; CloudNativePG's own
+          # backup metrics stay at 0 for plugin backups.
+          expr: time() - max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp) > 30 * 3600
           for: 30m
           labels: { severity: warning }
           annotations:
             summary: The newest Postgres backup is older than 30 hours (nightly backups stopped).
             description: "Check: kubectl -n data get backups,scheduledbackups; Garage on the host"
+        - alert: PostgresBackupFailed
+          expr: max(barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp) > max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp)
+          labels: { severity: warning }
+          annotations:
+            summary: The last Postgres backup attempt failed after the last good one.
+            description: "Check: kubectl -n data get backups; kubectl -n data describe backup <newest>"
         - alert: PostgresWalArchiveFailing
           expr: max(increase(cnpg_pg_stat_archiver_failed_count[30m])) > 0
           labels: { severity: warning }
