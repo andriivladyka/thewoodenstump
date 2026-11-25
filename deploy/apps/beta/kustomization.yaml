@@ -22,9 +22,6 @@ images:
 - digest: sha256:e4227872586f48b3afc0b9fb6107b0e0388649ab965d9da59ef0774ccac4cd63
   name: ghcr.io/andriivladyka/thewoodenstump/mcp
   newName: ghcr.io/andriivladyka/thewoodenstump/mcp
-- digest: sha256:1d9b0fe60a0aa051a4115b0bfb3f57262b0f3678c57737a82883e5ea095f6a04
-  name: ghcr.io/andriivladyka/thewoodenstump/reset
-  newName: ghcr.io/andriivladyka/thewoodenstump/reset
 - digest: sha256:351668ca4bbdb80ca051fba478d0c1b967525879ab68c13fbfc3977f6bbb3a2c
   name: ghcr.io/andriivladyka/thewoodenstump/smoke
   newName: ghcr.io/andriivladyka/thewoodenstump/smoke

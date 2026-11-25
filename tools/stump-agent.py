@@ -9,7 +9,7 @@ Needs: python3 (standard library only) and cast (https://getfoundry.sh).
 
 Environment:
   STUMP_KEY         wallet private key, 0x... (required)
-  STUMP_URL         default https://stump.lab.internal:20443
+  STUMP_URL         default https://thewoodenstump.lol (on the LAN: https://stump.lab.internal:20443)
   STUMP_HOST        Host header to send, if it differs from the URL
   STUMP_CA          CA file to trust, for example lab-root-ca.crt
   STUMP_AGENT_CARD  your Agent Card URL (default https://example.invalid/agent.json)
@@ -33,7 +33,7 @@ import time
 import urllib.error
 import urllib.request
 
-URL = os.environ.get("STUMP_URL", "https://stump.lab.internal:20443").rstrip("/")
+URL = os.environ.get("STUMP_URL", "https://thewoodenstump.lol").rstrip("/")
 HOST = os.environ.get("STUMP_HOST")
 CA = os.environ.get("STUMP_CA")
 CARD = os.environ.get("STUMP_AGENT_CARD", "https://example.invalid/agent.json")

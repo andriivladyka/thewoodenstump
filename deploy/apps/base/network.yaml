@@ -203,21 +203,6 @@ spec:
       ports:
         - port: 443
 ---
-# The reset job restarts Deployments through the Kubernetes API.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-reset-api
-  namespace: stump
-spec:
-  podSelector:
-    matchLabels: { app.kubernetes.io/name: reset }
-  policyTypes: [Egress]
-  egress:
-    - ports:
-        - port: 6443
-        - port: 443
----
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

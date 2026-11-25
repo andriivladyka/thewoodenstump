@@ -28,7 +28,8 @@ type auth struct {
 	pub        stump.Public
 	domain     cred.Domain
 	issuerURL  string
-	issuer     common.Address
+	issuerMu   sync.RWMutex
+	issuer     common.Address // re-read every minute, so a key rotation needs no restart
 	kv         jetstream.KeyValue
 	http       *http.Client
 	readLimit  int
@@ -70,7 +71,24 @@ func main() {
 		app.Log.Error("kv", "err", err)
 		os.Exit(1)
 	}
-	app.Log.Info("edge-auth ready", "issuer", a.issuer.Hex())
+	app.Log.Info("edge-auth ready", "issuer", a.issuerAddress().Hex())
+	go func() {
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				prev := a.issuerAddress()
+				if err := a.loadIssuer(ctx); err != nil {
+					app.Log.Warn("issuer address not refreshed", "err", err)
+				} else if now := a.issuerAddress(); now != prev {
+					app.Log.Info("issuer address changed", "from", prev.Hex(), "to", now.Hex())
+				}
+			}
+		}
+	}()
 	app.Mux.HandleFunc("/verify", a.verify)
 	app.Serve()
 }
@@ -88,8 +106,16 @@ func (a *auth) loadIssuer(ctx context.Context) error {
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil || !common.IsHexAddress(info.Address) {
 		return fmt.Errorf("issuer gave no address")
 	}
+	a.issuerMu.Lock()
 	a.issuer = common.HexToAddress(info.Address)
+	a.issuerMu.Unlock()
 	return nil
+}
+
+func (a *auth) issuerAddress() common.Address {
+	a.issuerMu.RLock()
+	defer a.issuerMu.RUnlock()
+	return a.issuer
 }
 
 func (a *auth) deny(w http.ResponseWriter, status int, code, msg string) {
@@ -118,7 +144,7 @@ func (a *auth) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	if err := c.Verify(a.domain, a.issuer, now); err != nil {
+	if err := c.Verify(a.domain, a.issuerAddress(), now); err != nil {
 		a.deny(w, 401, "invalid_credential", err.Error())
 		return
 	}

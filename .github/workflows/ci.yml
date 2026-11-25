@@ -42,7 +42,7 @@ jobs:
       security-events: write # scan results go to the repo's Security tab
     strategy:
       matrix:
-        service: [edge-auth, billing, issuer, board, trust, anchor, mcp, web, smoke, bots, reset]
+        service: [edge-auth, billing, issuer, board, trust, anchor, mcp, web, smoke, bots]
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -110,7 +110,7 @@ jobs:
           IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yml@refs/heads/main
         run: |
           cd deploy/apps/beta
-          for s in edge-auth billing issuer board trust anchor mcp web smoke bots reset; do
+          for s in edge-auth billing issuer board trust anchor mcp web smoke bots; do
             digest=$(docker buildx imagetools inspect "$REPO/$s:sha-$GITHUB_SHA" --format '{{json .Manifest}}' | jq -r .digest)
             cosign verify "$REPO/$s@$digest" --certificate-identity "$IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
