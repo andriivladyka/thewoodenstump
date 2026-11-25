@@ -1,0 +1,222 @@
+// issuer signs credentials (only billing may ask), records revocations and
+// answers public trust lookups. It emits credential events to NATS.
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go/jetstream"
+
+	"github.com/andriivladyka/thewoodenstump/pkg/cred"
+	"github.com/andriivladyka/thewoodenstump/pkg/stump"
+)
+
+type issuer struct {
+	db     *pgxpool.Pool
+	js     jetstream.JetStream
+	signer cred.Signer
+	domain cred.Domain
+}
+
+func main() {
+	app := stump.New("issuer")
+	ctx := app.Context()
+	key, err := os.ReadFile(stump.Env("ISSUER_KEY_FILE", "/var/run/secrets/stump/issuer-key/private-key"))
+	if err != nil {
+		app.Log.Error("cannot read issuer key", "err", err)
+		os.Exit(2)
+	}
+	signer, err := cred.NewKeySigner(string(key))
+	if err != nil {
+		app.Log.Error("bad issuer key", "err", err)
+		os.Exit(2)
+	}
+	db, err := stump.DB(ctx, "issuer")
+	if err != nil {
+		os.Exit(1)
+	}
+	if err := stump.Migrate(ctx, db,
+		`CREATE TABLE IF NOT EXISTS credentials (
+			id text PRIMARY KEY, subject text NOT NULL, subject_chain_id bigint NOT NULL,
+			plan text NOT NULL, terms_version text NOT NULL, payment_ref text NOT NULL,
+			issued_at timestamptz NOT NULL, expires_at timestamptz NOT NULL,
+			signature text NOT NULL, revoked_at timestamptz, revoke_reason text)`,
+		`CREATE INDEX IF NOT EXISTS credentials_subject ON credentials (lower(subject))`,
+	); err != nil {
+		app.Log.Error("migrate", "err", err)
+		os.Exit(1)
+	}
+	_, js, err := stump.NATS(ctx, "issuer")
+	if err != nil {
+		os.Exit(1)
+	}
+	if _, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
+		Name: "CREDENTIALS", Subjects: []string{"stump.issuer.>"}, Storage: jetstream.FileStorage,
+	}); err != nil {
+		app.Log.Error("stream", "err", err)
+		os.Exit(1)
+	}
+	is := &issuer{db: db, js: js, signer: signer, domain: cred.DomainFromEnv()}
+	app.Log.Info("issuer ready", "address", signer.Address().Hex(), "domain", is.domain.Name)
+
+	app.Mux.HandleFunc("GET /v1/issuer", is.info)
+	app.Mux.HandleFunc("GET /v1/trust/{wallet}", is.lookup)
+	app.Mux.HandleFunc("POST /internal/credentials", is.issue)
+	app.Mux.HandleFunc("GET /internal/credentials/{id}/status", is.status)
+	app.Mux.HandleFunc("POST /internal/credentials/{id}/revoke", is.revoke)
+	app.Serve()
+}
+
+func (is *issuer) info(w http.ResponseWriter, _ *http.Request) {
+	stump.JSON(w, 200, map[string]any{"address": is.signer.Address().Hex(), "eip712_domain": is.domain})
+}
+
+type issueRequest struct {
+	Subject      string `json:"subject"`
+	ChainID      int64  `json:"chain_id"`
+	Plan         string `json:"plan"`
+	TermsVersion string `json:"terms_version"`
+	PaymentRef   string `json:"payment_ref"`
+	ValidDays    int    `json:"valid_days"`
+}
+
+func (is *issuer) issue(w http.ResponseWriter, r *http.Request) {
+	var req issueRequest
+	if err := stump.ReadJSON(r, 4096, &req); err != nil {
+		stump.Error(w, 400, "bad_request", err.Error())
+		return
+	}
+	if !common.IsHexAddress(req.Subject) || req.ValidDays < 1 || req.ValidDays > 366 || req.PaymentRef == "" {
+		stump.Error(w, 400, "bad_request", "subject, valid_days (1-366) and payment_ref are required")
+		return
+	}
+	id := make([]byte, 16)
+	rand.Read(id)
+	now := time.Now().UTC().Truncate(time.Second)
+	c := &cred.Credential{
+		ID: hex.EncodeToString(id), Subject: common.HexToAddress(req.Subject).Hex(),
+		SubjectChainID: req.ChainID, Plan: req.Plan, TermsVersion: req.TermsVersion,
+		PaymentRef: req.PaymentRef, IssuedAt: now.Unix(),
+		ExpiresAt: now.Add(time.Duration(req.ValidDays) * 24 * time.Hour).Unix(),
+	}
+	if err := c.Sign(is.domain, is.signer); err != nil {
+		stump.Error(w, 500, "sign_failed", err.Error())
+		return
+	}
+	_, err := is.db.Exec(r.Context(), `INSERT INTO credentials
+		(id, subject, subject_chain_id, plan, terms_version, payment_ref, issued_at, expires_at, signature)
+		VALUES ($1,$2,$3,$4,$5,$6,to_timestamp($7),to_timestamp($8),$9)`,
+		c.ID, c.Subject, c.SubjectChainID, c.Plan, c.TermsVersion, c.PaymentRef, c.IssuedAt, c.ExpiresAt, c.Signature)
+	if err != nil {
+		stump.Error(w, 500, "store_failed", err.Error())
+		return
+	}
+	is.emit(r.Context(), "issued", c)
+	stump.JSON(w, 201, map[string]any{"credential": c, "encoded": c.Encode()})
+}
+
+func (is *issuer) emit(ctx context.Context, event string, c *cred.Credential) {
+	b, _ := json.Marshal(map[string]any{"event": event, "credential": c, "at": time.Now().Unix()})
+	if _, err := is.js.Publish(ctx, "stump.issuer.credential."+event, b); err != nil {
+		// The row is stored; anchor would miss this event, so log loudly.
+		slog.Error("event not published", "event", event, "id", c.ID, "err", err)
+	}
+}
+
+func (is *issuer) status(w http.ResponseWriter, r *http.Request) {
+	var revoked *time.Time
+	var expires time.Time
+	err := is.db.QueryRow(r.Context(), `SELECT revoked_at, expires_at FROM credentials WHERE id=$1`,
+		r.PathValue("id")).Scan(&revoked, &expires)
+	if errors.Is(err, pgx.ErrNoRows) {
+		stump.Error(w, 404, "unknown_credential", "")
+		return
+	} else if err != nil {
+		stump.Error(w, 500, "lookup_failed", err.Error())
+		return
+	}
+	stump.JSON(w, 200, map[string]any{"revoked": revoked != nil, "expires_at": expires.Unix()})
+}
+
+func (is *issuer) revoke(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := stump.ReadJSON(r, 1024, &req); err != nil || req.Reason == "" {
+		stump.Error(w, 400, "bad_request", "reason is required")
+		return
+	}
+	var c cred.Credential
+	var issued, expires time.Time
+	err := is.db.QueryRow(r.Context(), `UPDATE credentials SET revoked_at=now(), revoke_reason=$2
+		WHERE id=$1 AND revoked_at IS NULL
+		RETURNING id, subject, subject_chain_id, plan, terms_version, payment_ref, issued_at, expires_at, signature`,
+		r.PathValue("id"), req.Reason).Scan(&c.ID, &c.Subject, &c.SubjectChainID, &c.Plan, &c.TermsVersion,
+		&c.PaymentRef, &issued, &expires, &c.Signature)
+	if errors.Is(err, pgx.ErrNoRows) {
+		stump.Error(w, 404, "unknown_or_already_revoked", "")
+		return
+	} else if err != nil {
+		stump.Error(w, 500, "revoke_failed", err.Error())
+		return
+	}
+	c.IssuedAt, c.ExpiresAt, c.Issuer = issued.Unix(), expires.Unix(), is.signer.Address().Hex()
+	is.emit(r.Context(), "revoked", &c)
+	stump.JSON(w, 200, map[string]any{"revoked": c.ID})
+}
+
+func (is *issuer) lookup(w http.ResponseWriter, r *http.Request) {
+	wallet := r.PathValue("wallet")
+	if !common.IsHexAddress(wallet) {
+		stump.Error(w, 400, "bad_wallet", "not an address")
+		return
+	}
+	rows, err := is.db.Query(r.Context(), `SELECT id, plan, terms_version, issued_at, expires_at, revoked_at
+		FROM credentials WHERE lower(subject)=lower($1) ORDER BY issued_at DESC LIMIT 50`, wallet)
+	if err != nil {
+		stump.Error(w, 500, "lookup_failed", err.Error())
+		return
+	}
+	defer rows.Close()
+	type entry struct {
+		ID           string `json:"id"`
+		Plan         string `json:"plan"`
+		TermsVersion string `json:"terms_version"`
+		IssuedAt     int64  `json:"issued_at"`
+		ExpiresAt    int64  `json:"expires_at"`
+		Status       string `json:"status"`
+	}
+	out := []entry{}
+	for rows.Next() {
+		var e entry
+		var issued, expires time.Time
+		var revoked *time.Time
+		if err := rows.Scan(&e.ID, &e.Plan, &e.TermsVersion, &issued, &expires, &revoked); err != nil {
+			stump.Error(w, 500, "lookup_failed", err.Error())
+			return
+		}
+		e.IssuedAt, e.ExpiresAt = issued.Unix(), expires.Unix()
+		switch {
+		case revoked != nil:
+			e.Status = "revoked"
+		case time.Now().After(expires):
+			e.Status = "expired"
+		default:
+			e.Status = "valid"
+		}
+		out = append(out, e)
+	}
+	stump.JSON(w, 200, map[string]any{"wallet": common.HexToAddress(wallet).Hex(),
+		"issuer": is.signer.Address().Hex(), "credentials": out})
+}

@@ -1,0 +1,47 @@
+# The end-to-end check. Suspended: run it with
+#   kubectl -n stump create job --from=cronjob/smoke smoke-$(date +%s)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: smoke
+  namespace: stump
+spec:
+  schedule: "0 6 * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: smoke
+            app.kubernetes.io/part-of: stump
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: smoke
+              image: ghcr.io/andriivladyka/thewoodenstump/smoke
+              env:
+                - name: SMOKE_HOST
+                  valueFrom: { configMapKeyRef: { name: stump-config, key: API_HOST } }
+              volumeMounts:
+                - { name: wallet, mountPath: /var/run/secrets/stump/smoke-wallet, readOnly: true }
+              resources:
+                requests: { cpu: 10m, memory: 32Mi }
+                limits: { memory: 128Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL] }
+          volumes:
+            - name: wallet
+              secret: { secretName: smoke-wallet, defaultMode: 0400 }

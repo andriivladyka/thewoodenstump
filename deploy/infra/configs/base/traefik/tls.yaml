@@ -16,16 +16,18 @@ metadata:
 spec:
   minVersion: VersionTLS12
 ---
-# Placeholder until edge-auth exists (phase 4). Routes opt in by name.
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
+# In-cluster entry over plain HTTP (Traefik's web entry point), for mcp and
+# the smoke test. It is not exposed outside the cluster.
+apiVersion: v1
+kind: Service
 metadata:
-  name: edge-auth
+  name: traefik-internal
   namespace: traefik
 spec:
-  forwardAuth:
-    address: http://edge-auth.edge.svc.cluster.local:8080/verify
-    trustForwardHeader: false
-    authResponseHeaders:
-      - X-Stump-Agent
-      - X-Stump-Plan
+  selector:
+    app.kubernetes.io/name: traefik
+    app.kubernetes.io/instance: traefik-traefik
+  ports:
+    - name: web
+      port: 80
+      targetPort: 8000

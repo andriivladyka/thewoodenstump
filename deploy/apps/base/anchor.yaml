@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anchor
+  namespace: stump
+  labels:
+    app.kubernetes.io/name: anchor
+    app.kubernetes.io/part-of: stump
+    stump.db: "true"
+    stump.nats: "true"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anchor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anchor
+        app.kubernetes.io/part-of: stump
+        stump.db: "true"
+        stump.nats: "true"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: anchor
+          image: ghcr.io/andriivladyka/thewoodenstump/anchor
+          envFrom:
+            - configMapRef: { name: stump-config }
+          env:
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: db-anchor, key: username } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: db-anchor, key: password } }
+            - name: NATS_USER
+              value: anchor
+            - name: NATS_PASSWORD
+              valueFrom: { secretKeyRef: { name: nats-anchor, key: password } }
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anchor
+  namespace: stump
+spec:
+  selector:
+    app.kubernetes.io/name: anchor
+  ports:
+    - { name: http, port: 8080, targetPort: http }

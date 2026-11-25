@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trust
+  namespace: stump
+  labels:
+    app.kubernetes.io/name: trust
+    app.kubernetes.io/part-of: stump
+    stump.db: "true"
+    stump.nats: "true"
+    stump.public: "true"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trust
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: trust
+        app.kubernetes.io/part-of: stump
+        stump.db: "true"
+        stump.nats: "true"
+        stump.public: "true"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: trust
+          image: ghcr.io/andriivladyka/thewoodenstump/trust
+          envFrom:
+            - configMapRef: { name: stump-config }
+          env:
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: db-trust, key: username } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: db-trust, key: password } }
+            - name: NATS_USER
+              value: trust
+            - name: NATS_PASSWORD
+              valueFrom: { secretKeyRef: { name: nats-trust, key: password } }
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trust
+  namespace: stump
+spec:
+  selector:
+    app.kubernetes.io/name: trust
+  ports:
+    - { name: http, port: 8080, targetPort: http }

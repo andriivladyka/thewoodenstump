@@ -1,0 +1,17 @@
+# Every route that needs a key passes edge-auth first. Traefik sends the
+# body too, because the wallet signature covers it.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: edge-auth
+  namespace: stump
+spec:
+  forwardAuth:
+    address: http://edge-auth.stump.svc.cluster.local:8080/verify
+    trustForwardHeader: false
+    forwardBody: true
+    maxBodySize: 32768
+    authResponseHeaders:
+      - X-Stump-Agent
+      - X-Stump-Plan
+      - X-Stump-Credential-Id

@@ -1,0 +1,11 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: stump
+  namespace: stump
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/part-of: stump }
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics

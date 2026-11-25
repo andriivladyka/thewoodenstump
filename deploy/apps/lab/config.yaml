@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stump-config
+  namespace: stump
+data:
+  STUMP_ENVIRONMENT: lab
+  STUMP_PUBLIC_URL: https://stump.lab.internal:20443
+  API_HOST: stump.lab.internal
+  # Lab credentials use their own EIP-712 domain, so prod rejects them.
+  STUMP_DOMAIN_NAME: The Wooden Stump (lab)
+  STUMP_CHAIN_ID: "84532"
+  STUMP_TERMS_VERSION: "2026-11-24"
+  STUMP_PRICE_USD: "12.00"
+  PAYMENTS_TRIAL: "true"
+  PAYMENTS_X402: "false"
+  PAYMENTS_STRIPE: "false"
+  TRIAL_DAYS: "30"
+  # Wallets that get a free trial key. Public addresses only.
+  TRIAL_ALLOWLIST: >-
+    0x2220A0D49a7442A9BCeAB8e7fAF4dac548e36506
+  ANCHOR_CHAIN: dry-run
+  ANCHOR_INTERVAL: 1h
