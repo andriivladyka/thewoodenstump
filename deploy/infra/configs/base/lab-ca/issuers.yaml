@@ -1,0 +1,50 @@
+# Lab only: a private CA. Trust lab-root-ca on the machines that use the lab.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: lab-root-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: The Wooden Stump lab CA
+  secretName: lab-root-ca
+  duration: 87600h # 10 years
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    kind: ClusterIssuer
+    name: selfsigned
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: lab-ca
+spec:
+  ca:
+    secretName: lab-root-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: stump-lab
+  namespace: traefik
+spec:
+  secretName: stump-lab-tls
+  dnsNames:
+    - stump.lab.internal
+  duration: 2160h # 90 days
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    kind: ClusterIssuer
+    name: lab-ca
