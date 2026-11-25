@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -14,8 +15,10 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -41,6 +44,8 @@ type board struct {
 	db       *pgxpool.Pool
 	nc       *nats.Conn
 	js       jetstream.JetStream
+
+	firstParty map[string]bool // operator's own wallets, counted apart from users
 }
 
 func main() {
@@ -84,8 +89,12 @@ func main() {
 		app.Log.Error("stream", "err", err)
 		os.Exit(1)
 	}
-	b := &board{db: db, nc: nc, js: js, verifier: cred.VerifierFromEnv()}
+	b := &board{db: db, nc: nc, js: js, verifier: cred.VerifierFromEnv(), firstParty: map[string]bool{}}
+	for _, w := range stump.FirstParty() {
+		b.firstParty[w] = true
+	}
 	go b.expire(app)
+	app.Gauges(b.gauges)
 
 	app.Mux.HandleFunc("GET /v1/boards", b.list)
 	app.Mux.HandleFunc("GET /v1/boards/{slug}/messages", b.messages)
@@ -97,6 +106,62 @@ func main() {
 	app.Mux.HandleFunc("POST /internal/senders/{wallet}/remove", b.removeSender)
 	app.Mux.HandleFunc("GET /internal/removals", b.removals)
 	app.Serve()
+}
+
+func (b *board) party(wallet string) string {
+	if b.firstParty[strings.ToLower(wallet)] {
+		return "first_party"
+	}
+	return "external"
+}
+
+// gauges feeds the board activity dashboard.
+func (b *board) gauges(ctx context.Context) (map[string]float64, error) {
+	out := map[string]float64{
+		`stump_board_posters_24h{party="external"}`: 0, `stump_board_posters_24h{party="first_party"}`: 0,
+		`stump_board_posts_24h{party="external"}`: 0, `stump_board_posts_24h{party="first_party"}`: 0,
+	}
+	rows, err := b.db.Query(ctx, `SELECT b.slug, count(m.id) FROM boards b
+		LEFT JOIN messages m ON m.board = b.slug AND m.expires_at > now() GROUP BY b.slug`)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var slug string
+		var n int64
+		if rows.Scan(&slug, &n) == nil {
+			out[fmt.Sprintf(`stump_board_messages{board=%q}`, slug)] = float64(n)
+		}
+	}
+	rows.Close()
+	fp := make([]string, 0, len(b.firstParty))
+	for w := range b.firstParty {
+		fp = append(fp, w)
+	}
+	rows, err = b.db.Query(ctx, `SELECT lower(sender) = ANY($1), count(DISTINCT lower(sender)), count(*)
+		FROM messages WHERE posted_at > now() - interval '24 hours' GROUP BY 1`, fp)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var first bool
+		var posters, posts int64
+		if rows.Scan(&first, &posters, &posts) == nil {
+			party := "external"
+			if first {
+				party = "first_party"
+			}
+			out[fmt.Sprintf(`stump_board_posters_24h{party=%q}`, party)] = float64(posters)
+			out[fmt.Sprintf(`stump_board_posts_24h{party=%q}`, party)] = float64(posts)
+		}
+	}
+	rows.Close()
+	var removed int64
+	if err := b.db.QueryRow(ctx, `SELECT count(*) FROM removals`).Scan(&removed); err != nil {
+		return out, err
+	}
+	out[`stump_board_removals`] = float64(removed)
+	return out, nil
 }
 
 func (b *board) expire(app *stump.App) {
@@ -271,6 +336,7 @@ func (b *board) post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.Sender = signer.Hex()
+	metrics.GetOrCreateCounter(fmt.Sprintf(`stump_messages_posted_total{board=%q,party=%q}`, slug, b.party(m.Sender))).Inc()
 	out := &Stored{ID: id, Message: m, Signature: req.Signature, PostedAt: now.Unix(), ExpiresAt: now.Add(retention).Unix()}
 	ev, _ := json.Marshal(out)
 	if _, err := b.js.Publish(r.Context(), "stump.board.message.posted."+slug, ev); err != nil {

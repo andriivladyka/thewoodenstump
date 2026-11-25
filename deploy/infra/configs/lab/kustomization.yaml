@@ -6,4 +6,5 @@ resources:
   - ../base/postgres
   - ../base/scrapes
   - ../base/alerts
+  - ../base/dashboards
   - s3-backups.yaml

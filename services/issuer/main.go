@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -72,6 +73,7 @@ func main() {
 		os.Exit(1)
 	}
 	is := &issuer{db: db, js: js, signer: signer, domain: cred.DomainFromEnv()}
+	app.Gauges(is.gauges)
 	app.Log.Info("issuer ready", "address", signer.Address().Hex(), "domain", is.domain.Name)
 
 	app.Mux.HandleFunc("GET /v1/issuer", is.info)
@@ -83,6 +85,47 @@ func main() {
 	app.Mux.HandleFunc("POST /internal/wallets/{wallet}/block", is.block)
 	app.Mux.HandleFunc("DELETE /internal/wallets/{wallet}/block", is.unblock)
 	app.Serve()
+}
+
+// gauges feeds the board activity dashboard: keys and the wallets that hold
+// them, with the operator's own wallets counted apart.
+func (is *issuer) gauges(ctx context.Context) (map[string]float64, error) {
+	out := map[string]float64{}
+	for _, party := range []string{"external", "first_party"} {
+		for _, m := range []string{"stump_keys_valid", "stump_wallets_with_valid_key", "stump_keys_issued_24h", "stump_wallets_total"} {
+			out[fmt.Sprintf(`%s{party=%q}`, m, party)] = 0
+		}
+	}
+	rows, err := is.db.Query(ctx, `SELECT lower(subject) = ANY($1),
+		count(*) FILTER (WHERE revoked_at IS NULL AND expires_at > now()),
+		count(DISTINCT lower(subject)) FILTER (WHERE revoked_at IS NULL AND expires_at > now()),
+		count(*) FILTER (WHERE issued_at > now() - interval '24 hours'),
+		count(DISTINCT lower(subject))
+		FROM credentials GROUP BY 1`, stump.FirstParty())
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var first bool
+		var valid, wallets, issued, ever int64
+		if rows.Scan(&first, &valid, &wallets, &issued, &ever) == nil {
+			party := "external"
+			if first {
+				party = "first_party"
+			}
+			out[fmt.Sprintf(`stump_keys_valid{party=%q}`, party)] = float64(valid)
+			out[fmt.Sprintf(`stump_wallets_with_valid_key{party=%q}`, party)] = float64(wallets)
+			out[fmt.Sprintf(`stump_keys_issued_24h{party=%q}`, party)] = float64(issued)
+			out[fmt.Sprintf(`stump_wallets_total{party=%q}`, party)] = float64(ever)
+		}
+	}
+	rows.Close()
+	var blocked int64
+	if err := is.db.QueryRow(ctx, `SELECT count(*) FROM blocked_wallets`).Scan(&blocked); err != nil {
+		return out, err
+	}
+	out[`stump_wallets_blocked`] = float64(blocked)
+	return out, nil
 }
 
 func (is *issuer) info(w http.ResponseWriter, _ *http.Request) {

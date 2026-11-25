@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -74,6 +75,7 @@ func main() {
 		os.Exit(1)
 	}
 	t := &trust{db: db, nc: nc, verifier: cred.VerifierFromEnv()}
+	app.Gauges(t.gauges)
 	app.Mux.HandleFunc("POST /v1/vouches", t.vouch)
 	app.Mux.HandleFunc("GET /v1/vouches", t.listVouches)
 	app.Mux.HandleFunc("DELETE /v1/vouches/{id}", t.revoke)
@@ -263,6 +265,24 @@ func (t *trust) listFlags(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{"id": id, "flagger": flagger, "reason": reason, "note": note, "signature": sig, "created_at": at})
 	}
 	stump.JSON(w, 200, map[string]any{"subject": norm(subject), "flags": out})
+}
+
+// gauges feeds the board activity dashboard.
+func (t *trust) gauges(ctx context.Context) (map[string]float64, error) {
+	var vouches, delegations, flags, flagged int64
+	err := t.db.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM vouches WHERE revoked_at IS NULL AND expires_at > now()),
+		(SELECT count(*) FROM delegations WHERE revoked_at IS NULL AND expires_at > now()),
+		(SELECT count(*) FROM flags WHERE created_at > now() - interval '7 days'),
+		(SELECT count(DISTINCT subject) FROM flags WHERE created_at > now() - interval '7 days')`).
+		Scan(&vouches, &delegations, &flags, &flagged)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]float64{
+		`stump_vouches_active`: float64(vouches), `stump_delegations_active`: float64(delegations),
+		`stump_flags_7d`: float64(flags), `stump_flagged_wallets_7d`: float64(flagged),
+	}, nil
 }
 
 func (t *trust) recentFlags(w http.ResponseWriter, r *http.Request) {
