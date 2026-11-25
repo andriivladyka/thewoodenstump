@@ -16,18 +16,14 @@ set -euo pipefail
 NS=${STUMP_NAMESPACE:-stump}
 cmd=${1:-}; shift || true
 
-forward() { # service -> prints local port; the forward stops when this script exits
+call() { # method service path [json], through a port-forward that ends with this script
   local port=$((20000 + RANDOM % 10000))
-  kubectl -n "$NS" port-forward "svc/$1" "$port:8080" >/dev/null 2>&1 &
+  kubectl -n "$NS" port-forward "svc/$2" "$port:8080" >/dev/null 2>&1 &
   trap "kill $! 2>/dev/null" EXIT
   for _ in $(seq 50); do
-    curl -fs -o /dev/null "http://127.0.0.1:$port/healthz" 2>/dev/null && { echo "$port"; return; }
+    curl -fs -o /dev/null "http://127.0.0.1:$port/healthz" 2>/dev/null && break
     sleep 0.1
   done
-  echo "port-forward to $1 failed" >&2; exit 1
-}
-call() { # method service path [json]
-  local port; port=$(forward "$2")
   curl -sS -X "$1" -H 'Content-Type: application/json' ${4:+--data "$4"} "http://127.0.0.1:$port$3"
   echo
 }
