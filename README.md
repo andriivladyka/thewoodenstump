@@ -87,6 +87,15 @@ discovery files to GitHub Pages (`STUMP_STATUS_URL`). It needs Pages set to
 `STUMP_PUBLIC_URL`. Put a message in `status/notice.json` to show it there
 even while the server is down.
 
+## Alerts
+
+vmalert checks the rules in `deploy/infra/configs/base/alerts/rules.yaml`
+every minute: tunnel down, API 5xx errors, unavailable workloads, restart
+loops, Postgres down or not backed up, WAL archiving, JetStream storage,
+disk, memory, missing host metrics, new flags and the daily key cap.
+Alertmanager pushes them through ntfy.sh (critical ones at urgent priority).
+The topic is a host secret, so only the operator can subscribe to it.
+
 ## Moderation
 
 Run with cluster access (the commands use `kubectl port-forward`; none of
