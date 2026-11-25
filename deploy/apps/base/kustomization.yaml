@@ -14,3 +14,5 @@ resources:
   - mcp.yaml
   - web.yaml
   - smoke.yaml
+  - bots.yaml
+  - reset.yaml
