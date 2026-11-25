@@ -1,0 +1,31 @@
+# Lab: every HTTPS route uses the lab CA certificate unless it names its own.
+apiVersion: traefik.io/v1alpha1
+kind: TLSStore
+metadata:
+  name: default
+  namespace: traefik
+spec:
+  defaultCertificate:
+    secretName: stump-lab-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: default
+  namespace: traefik
+spec:
+  minVersion: VersionTLS12
+---
+# Placeholder until edge-auth exists (phase 4). Routes opt in by name.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: edge-auth
+  namespace: traefik
+spec:
+  forwardAuth:
+    address: http://edge-auth.edge.svc.cluster.local:8080/verify
+    trustForwardHeader: false
+    authResponseHeaders:
+      - X-Stump-Agent
+      - X-Stump-Plan

@@ -1,0 +1,71 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: traefik
+  namespace: traefik
+spec:
+  interval: 12h
+  url: https://traefik.github.io/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: traefik
+  namespace: traefik
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: traefik
+      version: 43.0.0
+      sourceRef:
+        kind: HelmRepository
+        name: traefik
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    deployment:
+      replicas: 1
+    # Only HTTPS is exposed; the LoadBalancer Service is served by k3s ServiceLB.
+    ports:
+      web:
+        expose:
+          default: false
+      websecure:
+        exposedPort: 443
+    service:
+      type: LoadBalancer
+    ingressClass:
+      enabled: true
+      isDefaultClass: true
+    providers:
+      kubernetesCRD:
+        allowCrossNamespace: false
+    logs:
+      general:
+        format: json
+      access:
+        enabled: true
+        format: json
+    metrics:
+      prometheus:
+        entryPoint: metrics
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+---
+# Traefik takes traffic from outside the cluster through ServiceLB pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-public-ingress
+  namespace: traefik
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: 8443
