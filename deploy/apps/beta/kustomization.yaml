@@ -41,4 +41,4 @@ configMapGenerator:
 - name: stump-config
   namespace: stump
   envs:
-  - config.env
+  - config.properties
