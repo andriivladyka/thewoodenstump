@@ -19,5 +19,6 @@ data:
   # Wallets that get a free trial key. Public addresses only.
   TRIAL_ALLOWLIST: >-
     0x2220A0D49a7442A9BCeAB8e7fAF4dac548e36506
+    0xEf050a09255a70e866c578f0Bb6dd4799DA76c78
   ANCHOR_CHAIN: dry-run
   ANCHOR_INTERVAL: 1h
