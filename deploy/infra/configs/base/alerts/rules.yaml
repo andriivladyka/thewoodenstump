@@ -1,0 +1,117 @@
+# Alert rules. vmalert evaluates them against VictoriaMetrics; Alertmanager
+# sends them as phone push notifications through ntfy (critical = urgent,
+# warning = normal). Each alert says what broke and where to look first.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: stump
+  namespace: observability
+spec:
+  groups:
+    - name: public
+      rules:
+        - alert: TunnelDown
+          expr: max(cloudflared_tunnel_ha_connections) < 1 or absent(cloudflared_tunnel_ha_connections)
+          for: 3m
+          labels: { severity: critical }
+          annotations:
+            summary: The Cloudflare tunnel has no connection; thewoodenstump.lol is offline.
+            description: "Check: kubectl -n tunnel get pods; kubectl -n tunnel logs deploy/cloudflared"
+        - alert: PublicErrors
+          expr: |
+            sum(rate(traefik_service_requests_total{service=~"stump-.*",code=~"5.."}[10m]))
+              / sum(rate(traefik_service_requests_total{service=~"stump-.*"}[10m])) > 0.05
+            and sum(increase(traefik_service_requests_total{service=~"stump-.*"}[10m])) > 20
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "More than 5% of API requests fail with 5xx ({{ $value | humanizePercentage }})."
+            description: "Check Grafana (traces and logs) or: kubectl -n stump get pods"
+    - name: workloads
+      rules:
+        - alert: ServiceUnavailable
+          expr: max by (namespace, deployment) (kube_deployment_status_replicas_unavailable{namespace=~"stump|tunnel|traefik|messaging|data|cnpg-system|cert-manager|flux-system"}) > 0
+          for: 10m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.deployment }} has had no ready pod for 10 minutes."
+            description: "Check: kubectl -n {{ $labels.namespace }} describe deploy {{ $labels.deployment }}"
+        - alert: StatefulSetUnavailable
+          expr: max by (namespace, statefulset) (kube_statefulset_replicas - kube_statefulset_status_replicas_ready) > 0
+          for: 10m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.statefulset }} is not ready (NATS lives here)."
+        - alert: PodRestarting
+          expr: max by (namespace, pod) (increase(kube_pod_container_status_restarts_total[30m])) > 3
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} restarted more than 3 times in 30 minutes."
+            description: "Check: kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} --previous"
+    - name: data
+      rules:
+        - alert: PostgresDown
+          expr: max(cnpg_collector_up) < 1 or absent(cnpg_collector_up)
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: Postgres (stump-pg) is not answering.
+            description: "Check: kubectl -n data get cluster,pods"
+        - alert: PostgresBackupOld
+          expr: time() - max(cnpg_collector_last_available_backup_timestamp) > 30 * 3600
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: The newest Postgres backup is older than 30 hours (nightly backups stopped).
+            description: "Check: kubectl -n data get backups,scheduledbackups; Garage on the host"
+        - alert: PostgresWalArchiveFailing
+          expr: max(increase(cnpg_pg_stat_archiver_failed_count[30m])) > 0
+          labels: { severity: warning }
+          annotations:
+            summary: Postgres failed to archive WAL to Garage in the last 30 minutes; point-in-time restore is at risk.
+        - alert: JetStreamStorageHigh
+          expr: max(nats_varz_jetstream_stats_storage / nats_varz_jetstream_config_max_storage) > 0.8
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "NATS JetStream storage is {{ $value | humanizePercentage }} full."
+    - name: host
+      rules:
+        - alert: DiskFilling
+          expr: min(node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.15
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "The host disk has {{ $value | humanizePercentage }} free."
+        - alert: DiskAlmostFull
+          expr: min(node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.05
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "The host disk has {{ $value | humanizePercentage }} free; Postgres and NATS will stop writing."
+        - alert: MemoryLow
+          expr: min(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.10
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "The host has {{ $value | humanizePercentage }} memory available."
+        - alert: HostMetricsMissing
+          expr: absent(up{job="node-exporter"} == 1)
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: No host metrics for 10 minutes; monitoring itself may be broken.
+    - name: moderation
+      rules:
+        - alert: NewFlag
+          expr: sum(increase(stump_flags_total[15m])) > 0
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $value | humanize }} new flag(s) on the board in the last 15 minutes."
+            description: "Review: tools/stump-admin.sh flags"
+        - alert: TrialKeyCapReached
+          expr: sum(increase(stump_trial_keys_refused_total{reason="daily_cap"}[1h])) > 0
+          labels: { severity: warning }
+          annotations:
+            summary: Today's free beta keys are used up; new agents are being turned away until 00:00 UTC.
+            description: "If this is real demand, raise TRIAL_KEYS_PER_DAY; if it is one source, look for abuse."

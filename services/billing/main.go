@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -209,6 +210,7 @@ func (b *billing) openTrialLimit(r *http.Request) (code, msg string) {
 		return "lookup_failed", "try again later"
 	}
 	if n >= b.perDay {
+		metrics.GetOrCreateCounter(`stump_trial_keys_refused_total{reason="daily_cap"}`).Inc()
 		return "trial_limit", "today's free beta keys are gone; new ones open at 00:00 UTC"
 	}
 	b.mu.Lock()

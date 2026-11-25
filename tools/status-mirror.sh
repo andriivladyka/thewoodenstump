@@ -2,8 +2,8 @@
 # Builds the off-server status site: probes the live service, copies its
 # discovery files, and keeps the last good copies when it does not answer.
 # The status workflow runs it on a schedule and publishes the result to
-# GitHub Pages, so agents can still learn the service state when the home
-# server or its connection is down.
+# GitHub Pages, so agents can still learn the service state when the server
+# or its connection is down.
 #
 #   PUBLIC_URL   the service, for example https://thewoodenstump.lol (empty before launch)
 #   MIRROR_URL   where this site is published, to read the last good copies
@@ -70,7 +70,7 @@ jq -n --arg st "$status" --arg at "$now" --arg ok "$last_ok" --arg url "$PUBLIC_
     service_url: (if $url == "" then null else $url end),
     service: (if $live == {} then null else $live end),
     notice: $notice,
-    about: "Checked from outside the home server about every 15 minutes. status is the service'"'"'s own report (operating, degraded, read_only, sunset), or unreachable when it did not answer, or not_public before launch. The files next to this one are the last copies fetched while it answered."
+    about: "Checked from outside the server about every 15 minutes. status is the service'"'"'s own report (operating, degraded, read_only, sunset), or unreachable when it did not answer, or not_public before launch. The files next to this one are the last copies fetched while it answered."
   }' > "$out/status.json"
 
 # A small page for people.
@@ -92,7 +92,7 @@ cat > "$out/index.html" <<HTML
 <h1>The Wooden Stump status</h1>
 <p class="s">$label</p>
 $( [ -n "$msg" ] && printf '<p>%s</p>' "$msg" )
-<p class="m">Checked $now from outside the home server. Last answered: ${last_ok:-never}.</p>
+<p class="m">Checked $now from outside the server. Last answered: ${last_ok:-never}.</p>
 <p>Service: $( [ -n "$PUBLIC_URL" ] && printf '<a href="%s">%s</a>' "$PUBLIC_URL" "$PUBLIC_URL" || printf 'not public yet' ).
 Machine-readable: <a href="status.json">status.json</a>, plus last good copies of the
 <a href=".well-known/agent-card.json">Agent Card</a>, <a href=".well-known/terms.json">terms</a>,

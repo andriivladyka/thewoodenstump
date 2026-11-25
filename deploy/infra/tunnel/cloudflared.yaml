@@ -47,3 +47,15 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: [ALL] }
+---
+# cloudflared's metrics (connections to Cloudflare) feed the TunnelDown alert.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: cloudflared
+  namespace: tunnel
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: cloudflared }
+  podMetricsEndpoints:
+    - port: metrics

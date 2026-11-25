@@ -10,7 +10,10 @@ spec:
 # Metrics: VictoriaMetrics single node, vmagent, node-exporter, kube-state-metrics.
 # Logs: VictoriaLogs single node, with vlagent collecting pod logs.
 # Traces: VictoriaTraces single node; services and Traefik send OTLP to it.
-# Grafana with all three as datasources. No alerting yet.
+# Grafana with all three as datasources.
+# Alerts: vmalert evaluates the VMRules in infra/configs/base/alerts and
+# Alertmanager pushes them to ntfy; the topic URLs are host secrets
+# (observability/alert-ntfy), never in git.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -36,9 +39,39 @@ spec:
     defaultRules:
       enabled: false
     alertmanager:
-      enabled: false
+      enabled: true
+      spec:
+        secrets: [alert-ntfy]
+        resources:
+          requests: { cpu: 10m, memory: 32Mi }
+          limits: { memory: 128Mi }
+      config:
+        route:
+          receiver: warning
+          group_by: [alertname]
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 12h
+          routes:
+            - matchers: ['severity="critical"']
+              receiver: critical
+              repeat_interval: 2h
+        receivers:
+          - name: warning
+            webhook_configs:
+              - url_file: /etc/vm/secrets/alert-ntfy/url-warning
+                send_resolved: true
+          - name: critical
+            webhook_configs:
+              - url_file: /etc/vm/secrets/alert-ntfy/url-critical
+                send_resolved: true
     vmalert:
-      enabled: false
+      enabled: true
+      spec:
+        evaluationInterval: 1m
+        resources:
+          requests: { cpu: 10m, memory: 32Mi }
+          limits: { memory: 256Mi }
     vmsingle:
       spec:
         retentionPeriod: 30d

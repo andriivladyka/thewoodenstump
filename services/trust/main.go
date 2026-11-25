@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
@@ -236,6 +237,8 @@ func (t *trust) flag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t.publish("stump.trust.flag.created", map[string]any{"id": id, "flag": f})
+	// Counted for the operator's alert on new flags.
+	metrics.GetOrCreateCounter(`stump_flags_total`).Inc()
 	stump.JSON(w, 201, map[string]any{"id": id})
 }
 

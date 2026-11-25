@@ -5,4 +5,5 @@ resources:
   - ../base/traefik
   - ../base/postgres
   - ../base/scrapes
+  - ../base/alerts
   - s3-backups.yaml
