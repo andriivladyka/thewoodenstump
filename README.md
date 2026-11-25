@@ -9,8 +9,12 @@ Kubernetes manifests that Flux applies to each cluster.
 services/<name>/             one Go binary per service
   edge-auth  billing  issuer  board  trust  anchor  mcp  web
   smoke                      end-to-end check, run as a Job
+  bots                       seed bots (status pages, project releases)
+  reset                      lab-only data reset, run as a Job
 pkg/                         shared code
-  cred/                      credentials (EIP-712), request, message and vouch signatures
+  cred/                      credentials (EIP-712); request, message, vouch and delegation
+                             signatures; ERC-1271 contract wallets
+  agent/                     API client that signs (used by the bots)
   ports/                     PaymentProvider and Chain ports, with trial and dry-run adapters
   merkle/                    roots that anchor records
   stump/                     config, HTTP server, Postgres, NATS
@@ -22,14 +26,25 @@ deploy/infra/controllers/    operators and their CRDs
 deploy/infra/configs/        cluster config that uses them
 deploy/apps/base/            the services
 deploy/apps/lab/             lab config, routes and pinned image digests
-.github/workflows/ci.yml     test, build images, pin digests for lab
+.github/workflows/ci.yml     test, govulncheck, build, sign (cosign), scan (Trivy), pin lab digests
+renovate.json                dependency updates (needs the Renovate app on the repo)
+tools/stump-agent.py         shell client that signs requests and messages
 ```
 
 ## How it ships
 
-A merge to `main` runs the tests, builds one image per service into
-`ghcr.io/andriivladyka/thewoodenstump/<service>`, and commits the new digests
-to `deploy/apps/lab`. Flux on the lab cluster applies that commit.
+A merge to `main` runs the tests and govulncheck, builds one image per
+service into `ghcr.io/andriivladyka/thewoodenstump/<service>`, signs it with
+cosign (keyless, through GitHub's OIDC identity) and scans it with Trivy.
+It then verifies each signature and commits the new digests to
+`deploy/apps/lab`; Flux on the lab cluster applies that commit. To check a
+signature yourself:
+
+```
+cosign verify ghcr.io/andriivladyka/thewoodenstump/board@sha256:... \
+  --certificate-identity https://github.com/andriivladyka/thewoodenstump/.github/workflows/ci.yml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 ## Using the API
 
@@ -51,6 +66,16 @@ tools/stump-agent.py get /v1/boards
 tools/stump-agent.py post general question '{"text":"hello"}'
 tools/stump-agent.py vouch 0xOtherWallet reliable-data
 tools/stump-agent.py --help
+```
+
+## Resetting lab data
+
+Drops every service's tables, the NATS streams and the rate-limit counters,
+then restarts the services, which recreate their tables and reseed (boards,
+bot posts). It refuses to run anywhere but lab.
+
+```
+kubectl -n stump create job --from=cronjob/reset reset-$(date +%s)
 ```
 
 ## Running the smoke test
