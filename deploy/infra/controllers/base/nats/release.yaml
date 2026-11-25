@@ -36,34 +36,58 @@ spec:
             storageClassName: local-path
       monitor:
         enabled: true
+      # Each user may publish only its own events and manage only its own
+      # stream (or KV bucket), and receives replies only on its own inbox
+      # prefix (_INBOX_<user>, set by the client). Nothing else is allowed:
+      # no user can read, change or delete another service's data.
       merge:
         authorization:
           users:
           - user: edge-auth
             password: << $NATS_EDGE_AUTH >>
             permissions:
-              publish: { allow: ["$JS.API.>", "$KV.edge_auth.>", "_INBOX.>"] }
-              subscribe: { allow: [">"] }
+              publish:
+                allow:
+                - "$KV.edge_auth.>"
+                - "$JS.API.STREAM.*.KV_edge_auth"
+                - "$JS.API.STREAM.MSG.GET.KV_edge_auth"
+                - "$JS.API.DIRECT.GET.KV_edge_auth.>"
+                - "$JS.API.INFO" # read-only account totals; creating a KV bucket asks for them
+              subscribe: { allow: ["_INBOX_edge-auth.>"] }
           - user: issuer
             password: << $NATS_ISSUER >>
             permissions:
-              publish: { allow: ["stump.issuer.>", "$JS.API.>", "_INBOX.>"] }
-              subscribe: { allow: [">"] }
+              publish:
+                allow:
+                - "stump.issuer.>"
+                - "$JS.API.STREAM.*.CREDENTIALS"
+              subscribe: { allow: ["_INBOX_issuer.>"] }
           - user: board
             password: << $NATS_BOARD >>
             permissions:
-              publish: { allow: ["stump.board.>", "$JS.API.>", "_INBOX.>"] }
-              subscribe: { allow: [">"] }
+              publish:
+                allow:
+                - "stump.board.>"
+                - "$JS.API.STREAM.*.BOARD"
+              subscribe: { allow: ["_INBOX_board.>", "stump.board.message.posted.*"] }
           - user: trust
             password: << $NATS_TRUST >>
             permissions:
-              publish: { allow: ["stump.trust.>", "_INBOX.>"] }
-              subscribe: { allow: [">"] }
+              publish: { allow: ["stump.trust.>"] }
+              subscribe: { allow: ["_INBOX_trust.>"] }
+          # anchor reads the issuer's stream through its own durable
+          # consumer and cannot change the stream itself.
           - user: anchor
             password: << $NATS_ANCHOR >>
             permissions:
-              publish: { allow: ["$JS.API.>", "$JS.ACK.>", "_INBOX.>"] }
-              subscribe: { allow: [">"] }
+              publish:
+                allow:
+                - "$JS.API.CONSUMER.CREATE.CREDENTIALS.anchor.>"
+                - "$JS.API.CONSUMER.DURABLE.CREATE.CREDENTIALS.anchor"
+                - "$JS.API.CONSUMER.INFO.CREDENTIALS.anchor"
+                - "$JS.API.CONSUMER.MSG.NEXT.CREDENTIALS.anchor"
+                - "$JS.ACK.CREDENTIALS.anchor.>"
+              subscribe: { allow: ["_INBOX_anchor.>"] }
     container:
       env:
         NATS_EDGE_AUTH:
