@@ -6,3 +6,4 @@ resources:
   - ../base/traefik
   - ../base/cloudnative-pg
   - ../base/nats
+  - ../base/observability
