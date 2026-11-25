@@ -7,9 +7,9 @@ name: ci
 on:
   push:
     branches: [main]
-    paths-ignore: ["deploy/**", "**.md"]
+    paths-ignore: ["deploy/**", "tools/**", "**.md"]
   pull_request:
-    paths-ignore: ["deploy/**", "**.md"]
+    paths-ignore: ["deploy/**", "tools/**", "**.md"]
 
 permissions:
   contents: read
