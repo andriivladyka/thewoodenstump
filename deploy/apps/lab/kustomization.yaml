@@ -28,3 +28,7 @@ images:
 - digest: sha256:f79f9dcda07a9b7016f23b6c14aceee1df2a90532277d17b55a263295ba1a8e7
   name: ghcr.io/andriivladyka/thewoodenstump/web
   newName: ghcr.io/andriivladyka/thewoodenstump/web
+resources:
+- ../base
+- config.yaml
+- routes.yaml
