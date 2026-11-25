@@ -1,0 +1,3 @@
+*.agekey
+*.env
+.DS_Store
