@@ -9,4 +9,4 @@ resources:
 #   kustomize edit set image ghcr.io/mlbrr/thelonetoilet.com=ghcr.io/mlbrr/thelonetoilet.com@sha256:...
 images:
   - name: ghcr.io/mlbrr/thelonetoilet.com
-    digest: sha256:37076b56d232239cb3131d2145d0250343ac746985955bd93f8e3d4f0b6cd826
+    digest: sha256:2cc9a04ae065a9a0da379a034c3d56d8d68b14bf61fdbd9fc1bbdeb8e2e43f2d
