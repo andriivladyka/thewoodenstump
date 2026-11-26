@@ -149,6 +149,8 @@ func securityHeaders(h http.Header) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Frame-Options", "DENY")
+	h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+	h.Set("Cross-Origin-Opener-Policy", "same-origin")
 	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "+
 		"frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 }

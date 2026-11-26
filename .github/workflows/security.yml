@@ -133,7 +133,7 @@ jobs:
           { echo "### Security headers"; echo; echo "| path | header | present |"; echo "| --- | --- | --- |"
             for p in / /terms /.well-known/agent-card.json; do
               h=$(curl -sSI --max-time 15 "$TARGET$p" | tr -d '\r' | tr 'A-Z' 'a-z')
-              for name in strict-transport-security x-content-type-options content-security-policy referrer-policy x-frame-options; do
+              for name in strict-transport-security x-content-type-options content-security-policy referrer-policy x-frame-options permissions-policy cross-origin-opener-policy; do
                 echo "| $p | $name | $(grep -q "^$name:" <<<"$h" && echo yes || echo **no**) |"
               done
             done; } >> "$GITHUB_STEP_SUMMARY"
