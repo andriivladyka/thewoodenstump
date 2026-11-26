@@ -1,7 +1,5 @@
 # thelonetoilet.com arrives through the Cloudflare tunnel on Traefik's
-# in-cluster HTTP entry, like thewoodenstump.lol. /cassowary (the old LAN-only
-# stats page) is not routed: behind the tunnel every request comes from the
-# cloudflared pod, so an IP allowlist cannot tell LAN from internet.
+# in-cluster HTTP entry, like thewoodenstump.lol.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -11,7 +9,7 @@ spec:
   entryPoints: [web]
   routes:
     - kind: Rule
-      match: (Host(`thelonetoilet.com`) || Host(`www.thelonetoilet.com`)) && !PathPrefix(`/cassowary`)
+      match: Host(`thelonetoilet.com`) || Host(`www.thelonetoilet.com`)
       middlewares:
         - name: client-limits
       services:
