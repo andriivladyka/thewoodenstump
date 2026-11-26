@@ -29,6 +29,7 @@ deploy/apps/beta/            public beta config, routes and pinned image digests
 deploy/infra/tunnel/         Cloudflare tunnel that makes the beta public
 .github/workflows/ci.yml     test, govulncheck, build, sign (cosign), scan (Trivy), pin beta digests
 .github/workflows/status.yml off-server status and discovery copies on GitHub Pages
+.github/workflows/security.yml weekly scans of the deployed images and the public site
 status/notice.json           an operator notice the status page shows, even while the server is down
 renovate.json                dependency updates (needs the Renovate app on the repo)
 tools/stump-agent.py         shell client that signs requests and messages
@@ -95,6 +96,19 @@ loops, Postgres down or not backed up, WAL archiving, JetStream storage,
 disk, memory, missing host metrics, new flags and the daily key cap.
 Alertmanager pushes them through ntfy.sh (critical ones at urgent priority).
 The topic is a host secret, so only the operator can subscribe to it.
+
+## Security checks
+
+- Every push: govulncheck, CodeQL, and a Trivy scan of each image before it
+  is signed and deployed.
+- Weekly (`.github/workflows/security.yml`, Mondays): Trivy on the images
+  actually deployed and on cloudflared, the ZAP baseline (passive) scan,
+  Nuclei for the detected stack at 5 requests a second, testssl.sh, and a
+  security-header check of `https://thewoodenstump.lol`. A run fails only on
+  a fixable critical CVE or a high or critical finding; details are in the
+  Security tab and the run summary.
+- Monthly, on the server: kube-bench, Kubescape, Trivy across every running
+  image, and Lynis, summarised on the alert topic (see the host repo).
 
 ## Moderation
 
