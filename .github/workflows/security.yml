@@ -1,0 +1,136 @@
+# Weekly security scans of what is actually running, from outside.
+# A run fails only on findings worth acting on, so GitHub's email about a
+# failed scheduled run means "look at this":
+#   - deployed images (the digests pinned in deploy/apps/beta, plus the
+#     tunnel's cloudflared) with a fixable critical CVE; CVEs are published
+#     after images are built, so the build-time scan alone goes stale
+#   - Nuclei finding a high or critical issue on https://thewoodenstump.lol
+#   - testssl.sh rating something high or critical
+# Everything found lands in the Security tab (code scanning) or the run's
+# summary and artifacts. ZAP's baseline scan is passive and only reports.
+# Active scans (ZAP active, fuzzing the API) are not run here: they send
+# attack traffic through Cloudflare and the home connection.
+name: security
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"   # Mondays 06:17 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/security.yml"]
+
+permissions:
+  contents: read
+
+env:
+  TARGET: https://thewoodenstump.lol
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.list.outputs.list }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: list
+        name: List the deployed images
+        run: |
+          ours=$(awk '/- digest:/{d=$3} /^  name: ghcr.io/{print $2"@"d}' deploy/apps/beta/kustomization.yaml)
+          theirs=$(grep -rhoE 'image: [a-z0-9./-]+/cloudflared:[A-Za-z0-9._-]+' deploy/infra | awk '{print $2}')
+          echo "list=$(printf '%s\n' $ours $theirs | jq -Rnc '[inputs | select(length > 0)]')" >> "$GITHUB_OUTPUT"
+          printf '%s\n' $ours $theirs
+
+  image-scan:
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.images.outputs.list) }}
+    steps:
+      - id: name
+        run: |
+          n="${{ matrix.image }}"; n="${n%@*}"; n="${n%:*}"; echo "short=${n##*/}" >> "$GITHUB_OUTPUT"
+      - name: Scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ matrix.image }}
+          format: sarif
+          output: trivy.sarif
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy.sarif
+          category: deployed-${{ steps.name.outputs.short }}
+      - name: Fail on fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ matrix.image }}
+          ignore-unfixed: true
+          severity: CRITICAL
+          exit-code: "1"
+          skip-setup-trivy: true
+
+  zap-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ZAP baseline (passive) scan
+        uses: zaproxy/action-baseline@v0.15.0
+        with:
+          target: ${{ env.TARGET }}
+          cmd_options: "-I -m 2"
+          allow_issue_writing: false
+          fail_action: false
+          artifact_name: zap-baseline
+
+  nuclei:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Nuclei
+        uses: projectdiscovery/nuclei-action@v3.1.0
+        with:
+          # 5 requests a second stays under the board's per-client limit.
+          args: -u ${{ env.TARGET }} -severity low,medium,high,critical -rl 5 -c 5 -jsonl-export nuclei.jsonl -sarif-export nuclei.sarif -silent -no-interactsh
+      - uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('nuclei.sarif') != ''
+        with:
+          sarif_file: nuclei.sarif
+          category: nuclei
+      - name: Summarize and fail on high or critical
+        if: always()
+        run: |
+          touch nuclei.jsonl
+          { echo "### Nuclei"; echo; echo "| severity | finding | where |"; echo "| --- | --- | --- |"
+            jq -r '"| \(.info.severity) | \(.info.name) | \(."matched-at") |"' nuclei.jsonl; } >> "$GITHUB_STEP_SUMMARY"
+          n=$(jq -r 'select(.info.severity=="high" or .info.severity=="critical") | .info.name' nuclei.jsonl | wc -l)
+          echo "high or critical: $n"; [ "$n" -eq 0 ]
+
+  tls-and-headers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: testssl.sh
+        run: |
+          docker run --rm -v "$PWD:/out" drwetter/testssl.sh:3.2 --quiet --color 0 --severity LOW \
+            --jsonfile /out/testssl.json thewoodenstump.lol > /dev/null || true
+          { echo "### TLS (testssl.sh)"; echo; echo "| severity | check | finding |"; echo "| --- | --- | --- |"
+            jq -r '.[] | select(.severity|test("LOW|MEDIUM|HIGH|CRITICAL")) | "| \(.severity) | \(.id) | \(.finding) |"' testssl.json; } >> "$GITHUB_STEP_SUMMARY"
+          n=$(jq '[.[] | select(.severity=="HIGH" or .severity=="CRITICAL")] | length' testssl.json)
+          echo "high or critical: $n"; [ "$n" -eq 0 ]
+      - name: Security headers
+        if: always()
+        run: |
+          { echo "### Security headers"; echo; echo "| path | header | present |"; echo "| --- | --- | --- |"
+            for p in / /terms /.well-known/agent-card.json; do
+              h=$(curl -sSI --max-time 15 "$TARGET$p" | tr -d '\r' | tr 'A-Z' 'a-z')
+              for name in strict-transport-security x-content-type-options content-security-policy referrer-policy x-frame-options; do
+                echo "| $p | $name | $(grep -q "^$name:" <<<"$h" && echo yes || echo **no**) |"
+              done
+            done; } >> "$GITHUB_STEP_SUMMARY"
