@@ -37,6 +37,7 @@ func main() {
 	app.Mux.HandleFunc("GET /.well-known/agent-card.json", w.agentCard)
 	app.Mux.HandleFunc("GET /.well-known/terms.json", w.terms)
 	app.Mux.HandleFunc("GET /terms", w.termsHTML)
+	app.Mux.HandleFunc("GET /.well-known/security.txt", w.securityTxt)
 	app.Mux.HandleFunc("GET /llms.txt", w.llms)
 	app.Mux.HandleFunc("GET /status.json", w.status)
 	app.Mux.HandleFunc("GET /openapi.json", func(rw http.ResponseWriter, _ *http.Request) {
@@ -160,6 +161,18 @@ func (w *web) status(rw http.ResponseWriter, _ *http.Request) {
 		"checked_at":  time.Now().UTC().Format(time.RFC3339),
 		"status_url":  nullable(w.pub.StatusURL),
 	})
+}
+
+// securityTxt tells researchers where to report problems (RFC 9116). The
+// expiry rolls forward, so the file never goes stale while the site runs.
+func (w *web) securityTxt(rw http.ResponseWriter, _ *http.Request) {
+	rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if w.pub.Contact != "" {
+		fmt.Fprintf(rw, "Contact: mailto:%s\n", w.pub.Contact)
+	}
+	fmt.Fprintf(rw, "Contact: https://github.com/andriivladyka/thewoodenstump/security/advisories/new\n"+
+		"Expires: %s\nPreferred-Languages: en\nCanonical: %s/.well-known/security.txt\nPolicy: %s/terms\n",
+		time.Now().UTC().AddDate(0, 6, 0).Truncate(24*time.Hour).Format(time.RFC3339), w.pub.URL, w.pub.URL)
 }
 
 func (w *web) terms(rw http.ResponseWriter, _ *http.Request) {
