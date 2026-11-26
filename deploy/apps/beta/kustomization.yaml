@@ -1,34 +1,34 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 images:
-- digest: sha256:894bafb6dba9cf8e0437658ab5c3e0b5f2c7670c5197ea493e091cd0305bcef9
+- digest: sha256:2850f68ffc481c1ed210c0664161faa16f2dad4912fa6630cde763fbcd034c85
   name: ghcr.io/andriivladyka/thewoodenstump/anchor
   newName: ghcr.io/andriivladyka/thewoodenstump/anchor
-- digest: sha256:3c50c95cf8ca9a8b85a0c4f247a2f39d89b5108353f7339673b31602826b30ba
+- digest: sha256:7051a02ee83ea720de5bd294787217b6fbbfbd4974f4a81d86509de6a15c9ea2
   name: ghcr.io/andriivladyka/thewoodenstump/billing
   newName: ghcr.io/andriivladyka/thewoodenstump/billing
-- digest: sha256:8aeee96ee81f134e20f990568f43fa5d14ed3c7971e3404b88fad91bd1acbe5a
+- digest: sha256:a3142a9ed9df23b492bd856d04b23e6180663cce68c6dd9aaa50cb7ed52fbfd6
   name: ghcr.io/andriivladyka/thewoodenstump/board
   newName: ghcr.io/andriivladyka/thewoodenstump/board
-- digest: sha256:db4b5a05c11ae5b09c2f83070c7a7b8447dbf53f65eea4be506dbd80a71d869d
+- digest: sha256:dcf32c3e9db63996445c12533249c2ec93425ca596e31d03c5705ed79906dbb3
   name: ghcr.io/andriivladyka/thewoodenstump/bots
   newName: ghcr.io/andriivladyka/thewoodenstump/bots
-- digest: sha256:ff4f6f27a95df3a47d14f3567516636df2aa83e08a7a038c879e68b0338ea211
+- digest: sha256:cad7ab9543eb47fc57feab56dd991f9307c5effe44f1be85e1ee76b12541b99d
   name: ghcr.io/andriivladyka/thewoodenstump/edge-auth
   newName: ghcr.io/andriivladyka/thewoodenstump/edge-auth
-- digest: sha256:0f3459c349cbe81b9de030d9ebad0af8bf5f901a63ceed1375c08ba40fb04b78
+- digest: sha256:43d26be784189ac18a44ea3b4f2f914093b504af1fa5466ec65347dfa312e510
   name: ghcr.io/andriivladyka/thewoodenstump/issuer
   newName: ghcr.io/andriivladyka/thewoodenstump/issuer
-- digest: sha256:6a9909c08dc0bcd0a4842a0876c6768ae7431c0e32155670e21c472e08ebddee
+- digest: sha256:f1305ab09e7e253819993502f00d2f075cab31011b94344cd1fa13602ef963af
   name: ghcr.io/andriivladyka/thewoodenstump/mcp
   newName: ghcr.io/andriivladyka/thewoodenstump/mcp
-- digest: sha256:01decb46fb49b5871a787adbb89a2a62121f3ebe506b5f97f29c3ed7734a50d3
+- digest: sha256:12a15d90ac6459115087c72eb68d6cfb4ca9eb3ea75a0daadcecbbcf4f0f54b9
   name: ghcr.io/andriivladyka/thewoodenstump/smoke
   newName: ghcr.io/andriivladyka/thewoodenstump/smoke
-- digest: sha256:53c60da77afa2a8b3e9f66cd3a8243024b7e84f9d9fddd6aa0a466e214e15213
+- digest: sha256:78fd5ea5b420b0e753132b32b203b88517bb5697d643b7d19aa3ded38c893145
   name: ghcr.io/andriivladyka/thewoodenstump/trust
   newName: ghcr.io/andriivladyka/thewoodenstump/trust
-- digest: sha256:57081efdd18848a0fc8e1a8835203dfaba50574c0f096aca1b633ebc15119a0f
+- digest: sha256:d93d96101e728feafdf19dfbd472c8e78b90af0ba265646d5df6cce25f5f596e
   name: ghcr.io/andriivladyka/thewoodenstump/web
   newName: ghcr.io/andriivladyka/thewoodenstump/web
 resources:
