@@ -1,0 +1,889 @@
+# Grafana dashboard: HTTP traffic per site, from Traefik's access logs in
+# VictoriaLogs (kept 14 days). The Site list comes from the logged hostnames,
+# so any site added behind Traefik shows up without editing this file.
+# "Visitors through Cloudflare" keeps requests carrying Cf-Ray; the other
+# choice adds the operator's in-cluster bots and tests.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-websites
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  websites.json: |
+    {
+      "uid": "websites",
+      "title": "Websites",
+      "tags": [
+        "websites",
+        "traefik"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "editable": true,
+      "refresh": "5m",
+      "time": {
+        "from": "now-24h",
+        "to": "now"
+      },
+      "description": "HTTP traffic for every site Traefik serves, from its access logs (14 days kept). Sites are found from the logs, so new ones appear on their own.",
+      "templating": {
+        "list": [
+          {
+            "type": "datasource",
+            "name": "logs",
+            "label": "Logs",
+            "query": "victoriametrics-logs-datasource",
+            "current": {},
+            "hide": 0,
+            "refresh": 1
+          },
+          {
+            "type": "query",
+            "name": "site",
+            "label": "Site",
+            "datasource": {
+              "type": "victoriametrics-logs-datasource",
+              "uid": "${logs}"
+            },
+            "query": {
+              "type": "fieldValue",
+              "field": "RequestHost",
+              "query": "kubernetes.pod_namespace:traefik RequestHost:*",
+              "limit": 200
+            },
+            "regex": "/^(?:www\\.)?(?<text>[a-z0-9.-]+\\.[a-z]{2,})$/",
+            "refresh": 2,
+            "multi": true,
+            "includeAll": true,
+            "allValue": ".*",
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            },
+            "sort": 1,
+            "hide": 0
+          },
+          {
+            "type": "custom",
+            "name": "source",
+            "label": "Traffic",
+            "query": "Visitors through Cloudflare : \"request_Cf-Ray\":*,Everything (incl. own bots and tests) : *",
+            "current": {
+              "text": "Visitors through Cloudflare",
+              "value": "\"request_Cf-Ray\":*"
+            },
+            "hide": 0,
+            "options": []
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Selected sites, selected time range",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Requests",
+          "description": "",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} | stats count() requests",
+              "queryType": "stats",
+              "editorMode": "code"
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "blue"
+              },
+              "noValue": "0"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Data served",
+          "description": "",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 1,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} | stats sum(DownstreamContentSize) bytes",
+              "queryType": "stats",
+              "editorMode": "code"
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "decimals": 1,
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "green"
+              },
+              "noValue": "0"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Server errors (5xx)",
+          "description": "Share of requests answered with a 5xx status.",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 1,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} | stats count() total, count() if (DownstreamStatus:>=500) errors | math errors / max(total, 1) * 100 as pct | fields pct",
+              "queryType": "stats",
+              "editorMode": "code"
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 2,
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "red"
+              },
+              "noValue": "0"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Median response time",
+          "description": "",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 1,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} | stats quantile(0.5, Duration) p50 | math p50 / 1000000 as ms | fields ms",
+              "queryType": "stats",
+              "editorMode": "code"
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "decimals": 1,
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "purple"
+              },
+              "noValue": "0"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 6,
+          "type": "row",
+          "title": "Traffic",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 5,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Requests per site",
+          "description": "www and the bare domain show separately.",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} | stats by (RequestHost) count() requests",
+              "queryType": "statsRange",
+              "editorMode": "code",
+              "legendFormat": "{{RequestHost}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0,
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 60,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "showPoints": "never",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Status codes",
+          "description": "",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 6,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} | stats by (DownstreamStatus) count() requests",
+              "queryType": "statsRange",
+              "editorMode": "code",
+              "legendFormat": "{{DownstreamStatus}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0,
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 60,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "showPoints": "never",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Data served per site",
+          "description": "",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 14,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} | stats by (RequestHost) sum(DownstreamContentSize) bytes",
+              "queryType": "statsRange",
+              "editorMode": "code",
+              "legendFormat": "{{RequestHost}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "min": 0,
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 60,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "showPoints": "never",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "95th percentile response time",
+          "description": "",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 14,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} | stats by (RequestHost) quantile(0.95, Duration) p95 | math p95 / 1000000 as ms | fields RequestHost, ms",
+              "queryType": "statsRange",
+              "editorMode": "code",
+              "legendFormat": "{{RequestHost}}"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "min": 0,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 15,
+                "lineWidth": 2,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "showPoints": "never",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 11,
+          "type": "row",
+          "title": "Who and what",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 22,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 12,
+          "type": "table",
+          "title": "Top pages",
+          "description": "",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 23,
+            "w": 12,
+            "h": 9
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} | stats by (RequestHost, RequestPath) count() hits | sort by (hits desc) | limit 25",
+              "queryType": "stats",
+              "editorMode": "code"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {
+                "mode": "columns"
+              }
+            },
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "RequestHost": "Site",
+                  "RequestPath": "Path",
+                  "hits": "Requests"
+                },
+                "indexByName": {
+                  "RequestHost": 0,
+                  "RequestPath": 1,
+                  "hits": 2
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "sort": [
+                  {
+                    "field": "Requests",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 13,
+          "type": "table",
+          "title": "Top user agents",
+          "description": "Logged since Nov 25, 2026.",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 23,
+            "w": 12,
+            "h": 9
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} | stats by (\"request_User-Agent\") count() hits | sort by (hits desc) | limit 25",
+              "queryType": "stats",
+              "editorMode": "code"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {
+                "mode": "columns"
+              }
+            },
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "request_User-Agent": "User agent",
+                  "hits": "Requests"
+                },
+                "indexByName": {
+                  "request_User-Agent": 0,
+                  "hits": 1
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "sort": [
+                  {
+                    "field": "Requests",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 14,
+          "type": "table",
+          "title": "Top referrers (other sites)",
+          "description": "Links from other sites; the sites' own pages are left out. Logged since Nov 25, 2026.",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 32,
+            "w": 12,
+            "h": 9
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} \"request_Referer\":* -\"request_Referer\":~\"^https?://(www\\\\.)?(${site:pipe})(/|$)\" | stats by (\"request_Referer\") count() hits | sort by (hits desc) | limit 25",
+              "queryType": "stats",
+              "editorMode": "code"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {
+                "mode": "columns"
+              }
+            },
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "request_Referer": "Referrer",
+                  "hits": "Requests"
+                },
+                "indexByName": {
+                  "request_Referer": 0,
+                  "hits": 1
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "sort": [
+                  {
+                    "field": "Requests",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 15,
+          "type": "table",
+          "title": "Errors (4xx and 5xx)",
+          "description": "402 on the board is a call without a key; 404s are often scanners.",
+          "datasource": {
+            "type": "victoriametrics-logs-datasource",
+            "uid": "${logs}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 32,
+            "w": 12,
+            "h": 9
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${logs}"
+              },
+              "expr": "kubernetes.pod_namespace:traefik RequestHost:~\"^(www\\\\.)?(${site:pipe})$\" ${source} DownstreamStatus:>=400 | stats by (RequestHost, DownstreamStatus, RequestPath) count() hits | sort by (hits desc) | limit 25",
+              "queryType": "stats",
+              "editorMode": "code"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {
+                "mode": "columns"
+              }
+            },
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "RequestHost": "Site",
+                  "DownstreamStatus": "Status",
+                  "RequestPath": "Path",
+                  "hits": "Requests"
+                },
+                "indexByName": {
+                  "RequestHost": 0,
+                  "DownstreamStatus": 1,
+                  "RequestPath": 2,
+                  "hits": 3
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "sort": [
+                  {
+                    "field": "Requests",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          }
+        }
+      ]
+    }
