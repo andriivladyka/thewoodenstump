@@ -129,6 +129,7 @@ func (a *App) instrument(h http.Handler) http.Handler {
 			h.ServeHTTP(w, r)
 			return
 		}
+		securityHeaders(w.Header())
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, code: 200}
 		h.ServeHTTP(sw, r)
@@ -139,6 +140,17 @@ func (a *App) instrument(h http.Handler) http.Handler {
 		metrics.GetOrCreateCounter(fmt.Sprintf(`stump_http_requests_total{service=%q,method=%q,code="%d"}`, a.Name, r.Method, sw.code)).Inc()
 		metrics.GetOrCreateHistogram(fmt.Sprintf(`stump_http_request_duration_seconds{service=%q}`, a.Name)).UpdateDuration(start)
 	})
+}
+
+// securityHeaders goes on every response. The pages are plain HTML with
+// inline styles and no scripts, so the content policy can be strict.
+func securityHeaders(h http.Header) {
+	h.Set("Strict-Transport-Security", "max-age=15552000")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "+
+		"frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 }
 
 // JSON writes v with the status code.

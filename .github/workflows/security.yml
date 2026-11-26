@@ -90,6 +90,7 @@ jobs:
 
   nuclei:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       security-events: write
@@ -98,7 +99,9 @@ jobs:
         uses: projectdiscovery/nuclei-action@v3.1.0
         with:
           # 5 requests a second stays under the board's per-client limit.
-          args: -u ${{ env.TARGET }} -severity low,medium,high,critical -rl 5 -c 5 -jsonl-export nuclei.jsonl -sarif-export nuclei.sarif -silent -no-interactsh
+          # -as picks templates for the detected stack; intrusive, DoS and
+          # fuzzing templates are left out.
+          args: -u ${{ env.TARGET }} -as -etags intrusive,dos,fuzz -severity low,medium,high,critical -rl 5 -c 5 -jsonl-export nuclei.jsonl -sarif-export nuclei.sarif -silent -no-interactsh
       - uses: github/codeql-action/upload-sarif@v4
         if: always() && hashFiles('nuclei.sarif') != ''
         with:
@@ -118,7 +121,7 @@ jobs:
     steps:
       - name: testssl.sh
         run: |
-          docker run --rm -v "$PWD:/out" drwetter/testssl.sh:3.2 --quiet --color 0 --severity LOW \
+          docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/out" drwetter/testssl.sh:3.2 --quiet --color 0 --severity LOW \
             --jsonfile /out/testssl.json thewoodenstump.lol > /dev/null || true
           { echo "### TLS (testssl.sh)"; echo; echo "| severity | check | finding |"; echo "| --- | --- | --- |"
             jq -r '.[] | select(.severity|test("LOW|MEDIUM|HIGH|CRITICAL")) | "| \(.severity) | \(.id) | \(.finding) |"' testssl.json; } >> "$GITHUB_STEP_SUMMARY"
