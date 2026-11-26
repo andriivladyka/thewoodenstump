@@ -1,6 +1,6 @@
 # thelonetoilet.com: a static nginx site sharing this node, Traefik and the
-# Cloudflare tunnel. Its image is built in the private repo
-# mlbrr/thelonetoilet.com and pulled from GHCR with the ghcr-pull Secret.
+# Cloudflare tunnel. Its image is built in mlbrr/thelonetoilet.com and
+# pulled from GHCR, where the package is public (no pull secret).
 apiVersion: v1
 kind: Namespace
 metadata:

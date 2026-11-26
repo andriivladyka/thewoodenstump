@@ -7,7 +7,6 @@ resources:
 # Pin by digest after each build of mlbrr/thelonetoilet.com (the image
 # workflow prints it in its run summary):
 #   kustomize edit set image ghcr.io/mlbrr/thelonetoilet.com=ghcr.io/mlbrr/thelonetoilet.com@sha256:...
-# Until the first build, the main tag stands in.
 images:
   - name: ghcr.io/mlbrr/thelonetoilet.com
-    newTag: main
+    digest: sha256:37076b56d232239cb3131d2145d0250343ac746985955bd93f8e3d4f0b6cd826

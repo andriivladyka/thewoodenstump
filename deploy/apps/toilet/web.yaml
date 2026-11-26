@@ -19,8 +19,6 @@ spec:
         app.kubernetes.io/part-of: toilet
     spec:
       automountServiceAccountToken: false
-      imagePullSecrets:
-        - name: ghcr-pull
       securityContext:
         runAsNonRoot: true
         runAsUser: 101 # nginx-unprivileged's nginx user
