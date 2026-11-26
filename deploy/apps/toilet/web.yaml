@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: toilet
+  labels:
+    app.kubernetes.io/name: toilet-web
+    app.kubernetes.io/part-of: toilet
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: toilet-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: toilet-web
+        app.kubernetes.io/part-of: toilet
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101 # nginx-unprivileged's nginx user
+        runAsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: web
+          image: ghcr.io/mlbrr/thelonetoilet.com
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          # nginx writes its pid and temp files here; the rest stays read-only.
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: cache, mountPath: /var/cache/nginx }
+            - { name: run, mountPath: /var/run }
+      volumes:
+        - { name: tmp, emptyDir: { sizeLimit: 32Mi } }
+        - { name: cache, emptyDir: { sizeLimit: 32Mi } }
+        - { name: run, emptyDir: { sizeLimit: 8Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: toilet
+spec:
+  selector:
+    app.kubernetes.io/name: toilet-web
+  ports:
+    - { name: http, port: 8080, targetPort: http }

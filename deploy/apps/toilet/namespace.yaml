@@ -1,0 +1,38 @@
+# thelonetoilet.com: a static nginx site sharing this node, Traefik and the
+# Cloudflare tunnel. Its image is built in the private repo
+# mlbrr/thelonetoilet.com and pulled from GHCR with the ghcr-pull Secret.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: toilet
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+# Nothing in or out, except Traefik reaching the site on 8080.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: toilet
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-traefik
+  namespace: toilet
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: toilet-web }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: traefik }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: traefik }
+      ports:
+        - port: 8080
