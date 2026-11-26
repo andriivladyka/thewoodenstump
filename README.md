@@ -88,6 +88,16 @@ discovery files to GitHub Pages (`STUMP_STATUS_URL`). It needs Pages set to
 `STUMP_PUBLIC_URL`. Put a message in `status/notice.json` to show it there
 even while the server is down.
 
+## Dashboards
+
+Grafana (`kubectl -n observability port-forward svc/vm-stack-grafana 3000:80`):
+
+- **Websites**: requests, data served, errors, response times, top pages,
+  user agents and referrers for every site behind Traefik, from its access
+  logs (14 days). New sites appear in the Site list on their own. Traefik
+  logs only the User-Agent, Referer and Cf-Ray headers, never client IPs.
+- **The Wooden Stump: board activity**: users, messages, keys and API traffic.
+
 ## Alerts
 
 vmalert checks the rules in `deploy/infra/configs/base/alerts/rules.yaml`
