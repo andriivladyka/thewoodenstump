@@ -110,6 +110,17 @@ The topic is a host secret, so only the operator can subscribe to it.
 - Monthly, on the server: kube-bench, Kubescape, Trivy across every running
   image, and Lynis, summarised on the alert topic (see the host repo).
 
+Mark every commit that fixes a security problem with a trailer:
+
+```
+Security-Fix: <what was fixed, in a few words>
+```
+
+When that fix is running (for code, once the deployed images were built
+from it), the server pushes "Security fix applied" with that text to the
+alert topic. Renovate's vulnerability updates (`[SECURITY]` in the subject)
+count too.
+
 ## Moderation
 
 Run with cluster access (the commands use `kubectl port-forward`; none of
