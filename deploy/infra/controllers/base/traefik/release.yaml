@@ -46,6 +46,17 @@ spec:
     accessLog:
       enabled: true
       format: json
+      # Every other header stays out of the logs. Cf-Ray is only present on
+      # requests that came through Cloudflare, so the Websites dashboard can
+      # tell real visitors from in-cluster bots and tests. Client IPs are
+      # never logged (the tunnel's address is all Traefik sees anyway).
+      fields:
+        headers:
+          defaultMode: drop
+          names:
+            User-Agent: keep
+            Referer: keep
+            Cf-Ray: keep
     metrics:
       prometheus:
         entryPoint: metrics
