@@ -123,8 +123,13 @@ jobs:
     steps:
       - name: testssl.sh
         run: |
-          docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/out" drwetter/testssl.sh:3.2 --quiet --color 0 --severity LOW \
+          # The image runs as its own user (testssl), so give it an output
+          # folder anyone can write rather than overriding its user.
+          mkdir -m 0777 out
+          docker run --rm -v "$PWD/out:/out" drwetter/testssl.sh:3.2 --quiet --color 0 --severity LOW \
             --jsonfile /out/testssl.json thewoodenstump.lol > /dev/null || true
+          if [ ! -s out/testssl.json ]; then echo "::error::testssl.sh wrote no report"; exit 1; fi
+          mv out/testssl.json testssl.json
           { echo "### TLS (testssl.sh)"; echo; echo "| severity | check | finding |"; echo "| --- | --- | --- |"
             jq -r '.[] | select(.severity|test("LOW|MEDIUM|HIGH|CRITICAL")) | "| \(.severity) | \(.id) | \(.finding) |"' testssl.json; } >> "$GITHUB_STEP_SUMMARY"
           n=$(jq '[.[] | select(.severity=="HIGH" or .severity=="CRITICAL")] | length' testssl.json)
