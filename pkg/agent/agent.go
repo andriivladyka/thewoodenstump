@@ -23,6 +23,8 @@ type Client struct {
 	HTTP   *http.Client
 	Wallet cred.Signer
 	Card   string // this agent's Agent Card URL
+	// UserAgent, when set, names this client in the board's access logs.
+	UserAgent string
 
 	mu         sync.Mutex
 	credential string
@@ -40,6 +42,9 @@ func (c *Client) Do(ctx context.Context, method, path string, body []byte, signe
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.UserAgent != "" {
+		req.Header.Set("User-Agent", c.UserAgent)
 	}
 	if signed {
 		cr, err := c.Credential(ctx)

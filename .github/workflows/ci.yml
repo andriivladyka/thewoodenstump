@@ -42,7 +42,7 @@ jobs:
       security-events: write # scan results go to the repo's Security tab
     strategy:
       matrix:
-        service: [edge-auth, billing, issuer, board, trust, anchor, mcp, web, smoke, bots]
+        service: [edge-auth, billing, issuer, board, trust, anchor, mcp, web, smoke, bots, mcp-local]
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -51,16 +51,33 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # mcp-local runs on agents' own machines, not in the cluster: it also
+      # gets its version and latest tags, and the label the official MCP
+      # Registry checks to tie the image to io.github.<owner>/thewoodenstump.
+      - id: meta
+        name: Tags and labels
+        run: |
+          img="ghcr.io/${{ github.repository }}/${{ matrix.service }}"
+          tags="$img:sha-${{ github.sha }}"
+          label=""
+          if [ "${{ matrix.service }}" = mcp-local ]; then
+            v=$(sed -n 's/^var version = "\(.*\)"$/\1/p' services/mcp-local/main.go)
+            tags="$tags,$img:$v,$img:latest"
+            label="io.modelcontextprotocol.server.name=io.github.${{ github.repository_owner }}/thewoodenstump"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v7
         id: build
         with:
           context: .
           build-args: SERVICE=${{ matrix.service }}
           push: true
-          tags: ghcr.io/${{ github.repository }}/${{ matrix.service }}:sha-${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            ${{ steps.meta.outputs.label }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
       - uses: sigstore/cosign-installer@v4.1.4

@@ -38,6 +38,8 @@ jobs:
         run: |
           ours=$(awk '/- digest:/{d=$3} /^  name: ghcr.io/{print $2"@"d}' deploy/apps/beta/kustomization.yaml)
           theirs=$(grep -rhoE 'image: [a-z0-9./-]+/cloudflared:[A-Za-z0-9._-]+' deploy/infra | awk '{print $2}')
+          # The local MCP server image that agents run on their own machines.
+          theirs="$theirs ghcr.io/${{ github.repository }}/mcp-local:latest"
           echo "list=$(printf '%s\n' $ours $theirs | jq -Rnc '[inputs | select(length > 0)]')" >> "$GITHUB_OUTPUT"
           printf '%s\n' $ours $theirs
 
