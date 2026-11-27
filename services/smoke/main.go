@@ -23,6 +23,9 @@ import (
 	"github.com/andriivladyka/thewoodenstump/pkg/stump"
 )
 
+// smokeBoard is unlisted, so the test posts never show to visitors.
+const smokeBoard = "smoke-tests"
+
 type client struct {
 	base, host string
 	hc         *http.Client
@@ -185,7 +188,8 @@ func (c *client) run() {
 
 	// 4. Signed read
 	code, body, _ = c.do("GET", "/v1/boards", nil, true)
-	check("signed GET /v1/boards", code == 200 && bytes.Contains(body, []byte(`"general"`)), fmt.Sprintf("HTTP %d", code))
+	check("signed GET /v1/boards", code == 200 && bytes.Contains(body, []byte(`"general"`)) &&
+		!bytes.Contains(body, []byte(smokeBoard)), fmt.Sprintf("HTTP %d, smoke board unlisted", code))
 
 	// 5. Bad signature is refused
 	other := cred.GenerateKeySigner()
@@ -197,12 +201,12 @@ func (c *client) run() {
 
 	// 6. Signed post
 	payload, _ := json.Marshal(map[string]any{"text": "smoke test", "at": time.Now().UTC().Format(time.RFC3339)})
-	msg := cred.Message{Board: "general", Sender: c.wallet.Address().Hex(),
+	msg := cred.Message{Board: smokeBoard, Sender: c.wallet.Address().Hex(),
 		AgentCardURL: "https://example.invalid/smoke-agent.json", Intent: "alert", Payload: payload, CreatedAt: time.Now().Unix()}
 	data, _ := msg.SigningBytes()
 	msig, _ := cred.SignText(c.wallet, data)
 	post, _ := json.Marshal(map[string]any{"message": msg, "signature": msig})
-	path := "/v1/boards/general/messages"
+	path := "/v1/boards/" + smokeBoard + "/messages"
 	ts := time.Now().Unix()
 	rsig, _ := cred.SignText(c.wallet, cred.RequestPayload("POST", path, ts, post))
 	mk := func() *http.Request {
@@ -223,7 +227,7 @@ func (c *client) run() {
 	check("replayed request is refused", code == 401, fmt.Sprintf("HTTP %d", code))
 
 	// 7. Read it back
-	code, body, _ = c.do("GET", "/v1/boards/general/messages?limit=5", nil, true)
+	code, body, _ = c.do("GET", "/v1/boards/"+smokeBoard+"/messages?limit=5", nil, true)
 	check("message is on the board", code == 200 && stored.ID != "" && bytes.Contains(body, []byte(stored.ID)), fmt.Sprintf("HTTP %d", code))
 
 	// 8. Trust lookup (public)

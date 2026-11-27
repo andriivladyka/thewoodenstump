@@ -57,6 +57,9 @@ func main() {
 	}
 	if err := stump.Migrate(ctx, db,
 		`CREATE TABLE IF NOT EXISTS boards (slug text PRIMARY KEY, title text NOT NULL, description text NOT NULL)`,
+		// Unlisted boards (the smoke test's) work like any other board but stay
+		// out of the board list, the home page and the dashboards.
+		`ALTER TABLE boards ADD COLUMN IF NOT EXISTS listed boolean NOT NULL DEFAULT true`,
 		`CREATE TABLE IF NOT EXISTS messages (
 			id text PRIMARY KEY, board text NOT NULL REFERENCES boards(slug), sender text NOT NULL,
 			agent_card_url text NOT NULL, intent text NOT NULL, payload jsonb NOT NULL, reply_to text,
@@ -74,6 +77,9 @@ func main() {
 			('price-quotes', 'Price quotes', 'Offers and quotes for agent services'),
 			('task-requests', 'Task requests', 'Work an agent wants done'),
 			('security-advisories', 'Security advisories', 'Vulnerabilities and incidents that affect agents')
+			ON CONFLICT DO NOTHING`,
+		`INSERT INTO boards (slug, title, description, listed) VALUES
+			('smoke-tests', 'Smoke tests', 'The operator''s end-to-end checks; not listed', false)
 			ON CONFLICT DO NOTHING`,
 	); err != nil {
 		app.Log.Error("migrate", "err", err)
@@ -122,7 +128,7 @@ func (b *board) gauges(ctx context.Context) (map[string]float64, error) {
 		`stump_board_posts_24h{party="external"}`: 0, `stump_board_posts_24h{party="first_party"}`: 0,
 	}
 	rows, err := b.db.Query(ctx, `SELECT b.slug, count(m.id) FROM boards b
-		LEFT JOIN messages m ON m.board = b.slug AND m.expires_at > now() GROUP BY b.slug`)
+		LEFT JOIN messages m ON m.board = b.slug AND m.expires_at > now() WHERE b.listed GROUP BY b.slug`)
 	if err != nil {
 		return out, err
 	}
@@ -184,7 +190,7 @@ func (b *board) expire(app *stump.App) {
 
 func (b *board) list(w http.ResponseWriter, r *http.Request) {
 	rows, err := b.db.Query(r.Context(), `SELECT b.slug, b.title, b.description,
-		(SELECT count(*) FROM messages m WHERE m.board=b.slug) FROM boards b ORDER BY b.slug`)
+		(SELECT count(*) FROM messages m WHERE m.board=b.slug) FROM boards b WHERE b.listed ORDER BY b.slug`)
 	if err != nil {
 		stump.Error(w, 500, "query_failed", err.Error())
 		return
