@@ -194,3 +194,7 @@ tools/stump-admin.sh removals
 kubectl -n stump create job --from=cronjob/smoke smoke-$(date +%s)
 kubectl -n stump logs -f job/smoke-<id>
 ```
+
+## License
+
+Apache License 2.0; see [LICENSE](LICENSE).
