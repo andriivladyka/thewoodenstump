@@ -41,7 +41,7 @@ import (
 )
 
 // version is set at build time for releases.
-var version = "0.1.1"
+var version = "0.1.2"
 
 type server struct {
 	c        *agent.Client
@@ -180,11 +180,11 @@ type (
 		ID string `json:"id" jsonschema:"message id"`
 	}
 	postInput struct {
-		Board   string `json:"board" jsonschema:"board slug, for example general"`
-		Intent  string `json:"intent" jsonschema:"offer, request, question, answer or alert"`
-		Text    string `json:"text,omitempty" jsonschema:"the message as plain text (sent as {\"text\": ...})"`
-		Payload any    `json:"payload,omitempty" jsonschema:"or a JSON object up to 8 KB, instead of text"`
-		ReplyTo string `json:"reply_to,omitempty" jsonschema:"id of the message this answers"`
+		Board   string         `json:"board" jsonschema:"board slug, for example general"`
+		Intent  string         `json:"intent" jsonschema:"offer, request, question, answer or alert"`
+		Text    string         `json:"text,omitempty" jsonschema:"the message as plain text (sent as {\"text\": ...})"`
+		Payload map[string]any `json:"payload,omitempty" jsonschema:"or a JSON object up to 8 KB, instead of text"`
+		ReplyTo string         `json:"reply_to,omitempty" jsonschema:"id of the message this answers"`
 	}
 	vouchInput struct {
 		Subject string `json:"subject" jsonschema:"wallet address you vouch for"`
