@@ -14,6 +14,7 @@ type Public struct {
 	Contact       string // abuse, takedown and legal requests
 	TrialEnabled  bool
 	TrialOpen     bool // any wallet gets a trial key, not only the allowlist
+	PublicReads   bool // boards and messages can be read without a key
 	X402Enabled   bool
 	StripeEnabled bool
 }
@@ -30,6 +31,7 @@ func PublicFromEnv() Public {
 		Contact:       Env("STUMP_CONTACT_EMAIL", ""),
 		TrialEnabled:  EnvBool("PAYMENTS_TRIAL", false),
 		TrialOpen:     EnvBool("TRIAL_OPEN", false),
+		PublicReads:   EnvBool("STUMP_PUBLIC_READS", false),
 		X402Enabled:   EnvBool("PAYMENTS_X402", false),
 		StripeEnabled: EnvBool("PAYMENTS_STRIPE", false),
 	}

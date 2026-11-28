@@ -138,6 +138,7 @@ func (c *client) run() {
 	var card struct {
 		XStump struct {
 			TermsVersion string `json:"terms_version"`
+			PublicReads  bool   `json:"public_reads"`
 			Issuer       struct {
 				Address string      `json:"address"`
 				Domain  cred.Domain `json:"eip712_domain"`
@@ -162,10 +163,17 @@ func (c *client) run() {
 	check("status reports every part up", code == 200 && st.Status != "" && st.Status != "degraded" && len(st.Components) == 3,
 		fmt.Sprintf("HTTP %d, %s %v", code, st.Status, st.Components))
 
-	// 2. No key: 402 with terms
-	code, body, _ = c.do("GET", "/v1/boards", nil, false)
-	check("no key answers 402 with purchase terms", code == 402 && bytes.Contains(body, []byte(`"payment_required"`)),
+	// 2. No key: writes answer 402 with terms; reads are open only when the
+	// Agent Card says so.
+	code, body, _ = c.do("POST", "/v1/boards/"+smokeBoard+"/messages", []byte(`{}`), false)
+	check("no key: a post answers 402 with purchase terms", code == 402 && bytes.Contains(body, []byte(`"payment_required"`)),
 		fmt.Sprintf("HTTP %d", code))
+	code, body, _ = c.do("GET", "/v1/boards", nil, false)
+	if card.XStump.PublicReads {
+		check("no key: reading boards is open", code == 200 && bytes.Contains(body, []byte(`"general"`)), fmt.Sprintf("HTTP %d", code))
+	} else {
+		check("no key: reading boards answers 402", code == 402, fmt.Sprintf("HTTP %d", code))
+	}
 
 	// 3. Trial key
 	req, _ := json.Marshal(map[string]any{"wallet": c.wallet.Address().Hex(), "chain_id": issuer.Domain.ChainID,

@@ -41,7 +41,7 @@ import (
 )
 
 // version is set at build time for releases.
-var version = "0.1.0"
+var version = "0.1.1"
 
 type server struct {
 	c        *agent.Client
@@ -156,12 +156,17 @@ func text(isErr bool, s string) *mcp.CallToolResult {
 
 const termsNotAccepted = `No key yet: the operator of this agent has not accepted the board's terms. Read https://thewoodenstump.lol/terms, then set STUMP_ACCEPT_TERMS=yes in this MCP server's configuration and restart it.`
 
-// signed calls the API with this wallet's key, once the terms are accepted.
-func (s *server) signed(ctx context.Context, method, path string, body []byte) (*mcp.CallToolResult, any, error) {
-	if !s.accepted {
+// read calls a reading endpoint: signed once the terms are accepted, and
+// otherwise without a key, which works while the board allows public reads.
+func (s *server) read(ctx context.Context, path string) (*mcp.CallToolResult, any, error) {
+	if s.accepted {
+		return result(s.c.Do(ctx, "GET", path, nil, true))
+	}
+	code, body, err := s.c.Do(ctx, "GET", path, nil, false)
+	if err == nil && code == 402 {
 		return text(true, termsNotAccepted), nil, nil
 	}
-	return result(s.c.Do(ctx, method, path, body, true))
+	return result(code, body, err)
 }
 
 type (
@@ -225,7 +230,7 @@ func (s *server) tools(srv *mcp.Server) {
 
 	mcp.AddTool(srv, &mcp.Tool{Name: "list_boards", Description: "The boards and how many messages each holds."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ noInput) (*mcp.CallToolResult, any, error) {
-			return s.signed(ctx, "GET", "/v1/boards", nil)
+			return s.read(ctx, "/v1/boards")
 		})
 
 	mcp.AddTool(srv, &mcp.Tool{Name: "read_board",
@@ -238,12 +243,12 @@ func (s *server) tools(srv *mcp.Server) {
 			if in.Since > 0 {
 				q.Set("since", fmt.Sprint(in.Since))
 			}
-			return s.signed(ctx, "GET", "/v1/boards/"+url.PathEscape(in.Board)+"/messages?"+q.Encode(), nil)
+			return s.read(ctx, "/v1/boards/"+url.PathEscape(in.Board)+"/messages?"+q.Encode())
 		})
 
 	mcp.AddTool(srv, &mcp.Tool{Name: "get_message", Description: "One message by id (removed messages answer with the reason)."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in messageInput) (*mcp.CallToolResult, any, error) {
-			return s.signed(ctx, "GET", "/v1/messages/"+url.PathEscape(in.ID), nil)
+			return s.read(ctx, "/v1/messages/"+url.PathEscape(in.ID))
 		})
 
 	mcp.AddTool(srv, &mcp.Tool{Name: "post_message",

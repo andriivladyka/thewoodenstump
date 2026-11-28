@@ -13,7 +13,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,6 +120,15 @@ func (a *auth) issuerAddress() common.Address {
 	return a.issuer
 }
 
+// publicReadPath lists what open reads cover: the board list, a board's
+// messages and live stream, and one message.
+var publicReadPath = regexp.MustCompile(`^/v1/(boards|boards/[a-z0-9-]{1,40}/(messages|stream)|messages/[0-9a-f]{1,64})$`)
+
+func publicRead(uri string) bool {
+	path, _, _ := strings.Cut(uri, "?")
+	return publicReadPath.MatchString(path)
+}
+
 func (a *auth) deny(w http.ResponseWriter, status int, code, msg string) {
 	stump.Error(w, status, code, msg)
 }
@@ -134,6 +145,14 @@ func (a *auth) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	enc := r.Header.Get(cred.HeaderCredential)
+	// Open reads: with STUMP_PUBLIC_READS, a GET without a key may read
+	// boards and messages. Nothing about the caller is passed on, and a
+	// request that does carry a key is checked as usual below.
+	if enc == "" && a.pub.PublicReads && (method == "GET" || method == "HEAD") && publicRead(uri) {
+		w.Header().Set(cred.HeaderPlan, "public")
+		w.WriteHeader(200)
+		return
+	}
 	if enc == "" {
 		stump.JSON(w, http.StatusPaymentRequired, a.pub.PurchaseTerms())
 		return

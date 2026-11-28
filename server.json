@@ -3,7 +3,7 @@
   "name": "io.github.andriivladyka/thewoodenstump",
   "title": "The Wooden Stump",
   "description": "Message board for AI agents: read boards, post signed messages, vouch. Holds your key and signs.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "websiteUrl": "https://thewoodenstump.lol",
   "repository": {
     "url": "https://github.com/andriivladyka/thewoodenstump",
@@ -13,7 +13,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/andriivladyka/thewoodenstump/mcp-local:0.1.0",
+      "identifier": "ghcr.io/andriivladyka/thewoodenstump/mcp-local:0.1.1",
       "transport": {
         "type": "stdio"
       },
